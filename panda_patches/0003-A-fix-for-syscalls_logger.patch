@@ -1,0 +1,76 @@
+From cf0f5f2b84636e7b54fa3553c1f0ade05f5be755 Mon Sep 17 00:00:00 2001
+From: John <john.aggel3@gmail.com>
+Date: Sat, 1 Apr 2023 17:54:14 -0400
+Subject: [PATCH 3/5] A fix for syscalls_logger
+
+---
+ .../syscalls_logger/syscalls_logger.cpp       | 24 +++++++++++++++----
+ 1 file changed, 19 insertions(+), 5 deletions(-)
+
+diff --git a/panda/plugins/syscalls_logger/syscalls_logger.cpp b/panda/plugins/syscalls_logger/syscalls_logger.cpp
+index 8e4d02a..67dc246 100644
+--- a/panda/plugins/syscalls_logger/syscalls_logger.cpp
++++ b/panda/plugins/syscalls_logger/syscalls_logger.cpp
+@@ -27,6 +27,7 @@ PANDAENDCOMMENT */
+ #include "osi/osi_ext.h"
+ 
+ #include "osi_linux/osi_linux_ext.h"
++#include "osi_linux/endian_helpers.h"
+ #else
+ typedef struct {
+   int pid;
+@@ -613,6 +614,8 @@ void log_argument(CPUState* cpu, const syscall_info_t *call, int i, Panda__Named
+ 
+     bool know_buf_len = false;
+     uint64_t buf_len = 0;
++    target_ulong temp = 0;
++    int ret = 0;
+ 
+     if (((strcasestr(call->argn[i], "buf") != NULL) || (strcasestr(call->argn[i], "optval") != NULL)) // arg named buf
+         && i < call->nargs-1 // has a next arg
+@@ -628,10 +631,16 @@ void log_argument(CPUState* cpu, const syscall_info_t *call, int i, Panda__Named
+         if (strcmp(call->name, "sys_read") == 0) {
+           buf_len = get_syscall_retval(cpu);
+ 	} else if (strcmp(call->name, "sys_setsockopt") == 0) {
+-          buf_len = (uint64_t) call->argt[i+1];
+-	  //printf("Syscall sys_setsockopt with optlen %lu\n", buf_len);
++	  buf_len =  flipbadendian(( *((target_ulong *) rp->args[i+1])));
++	  //printf("Syscall sys_setsockopt with optlen 0x%lx\n", buf_len);
+ 	} else if (strcmp(call->name, "sys_getsockopt") == 0) {
+-	  buf_len = (uint64_t) call->argt[i+1];
++	  temp =  flipbadendian(( *((target_ulong *) rp->args[i+1])));
++	  ret = panda_virtual_memory_read(cpu, temp, (uint8_t*)&buf_len, sizeof(target_ulong));
++          if (ret < 0) {
++	  	buf_len = 0;
++	  }
++	  buf_len = flipbadendian(buf_len);
++	  //printf("Syscall sys_getsockopt with optlen 0x%lx\n", buf_len);
+ 	}
+ 	else {
+             switch (call->argt[i+1]) {
+@@ -808,7 +817,7 @@ void log_argument(CPUState* cpu, const syscall_info_t *call, int i, Panda__Named
+         case SYSCALL_ARG_U32:
+             if (sa) {
+                 sa->u32 = *((uint32_t *) rp->args[i]);
+-                sa->has_u32 = true;
++		sa->has_u32 = true;
+             }else {
+                 if (*((uint32_t *) rp->args[i]) > 10) {
+                   std::cout << std::hex << "0x";
+@@ -849,7 +858,12 @@ void log_argument(CPUState* cpu, const syscall_info_t *call, int i, Panda__Named
+ 
+         case SYSCALL_ARG_S32:
+             if (sa) {
+-                sa->i32 = *((int32_t *) rp->args[i]);
++		if ((strcmp("sys_setsockopt", call->name) == 0) && (strcmp("optlen", call->argn[i]) == 0)){
++			sa->i32 = flipbadendian(( *((target_ulong *) rp->args[i])));
++		}
++		else {
++                	sa->i32 = *((int32_t *) rp->args[i]);
++		}
+                 sa->has_i32 = true;
+             } else {
+                 if (*((int32_t *) rp->args[i]) > 10) {
+-- 
+2.34.1
+

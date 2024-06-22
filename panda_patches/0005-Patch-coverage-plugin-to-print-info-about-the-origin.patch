@@ -1,0 +1,245 @@
+From 21c819d13db1f0543624044abbe94c3d65f89c71 Mon Sep 17 00:00:00 2001
+From: Ioannis Angelakopoulos <john.aggel3@gmail.com>
+Date: Sat, 22 Jun 2024 05:32:25 +0000
+Subject: [PATCH 5/5] Patch coverage plugin to print info about the origin of a
+ BB and its offset from the base address of the image
+
+---
+ panda/plugins/coverage/OsiBlockCsvWriter.cpp  | 39 ++++++++++++++---
+ panda/plugins/coverage/OsiBlockCsvWriter.h    | 12 +++++-
+ panda/plugins/osi_linux/osi_linux.cpp         | 43 ++++++++++++++++---
+ panda/plugins/osi_linux/osi_linux_int_fns.h   |  4 +-
+ .../syscall_to_mod_trace.cpp                  |  3 +-
+ 5 files changed, 84 insertions(+), 17 deletions(-)
+
+diff --git a/panda/plugins/coverage/OsiBlockCsvWriter.cpp b/panda/plugins/coverage/OsiBlockCsvWriter.cpp
+index 4068433..1623b83 100644
+--- a/panda/plugins/coverage/OsiBlockCsvWriter.cpp
++++ b/panda/plugins/coverage/OsiBlockCsvWriter.cpp
+@@ -2,6 +2,7 @@
+ #include "metadata_writer.h"
+ #include "osi_linux/osi_linux_ext.h"
+ #include <iostream>
++#include <cstdlib>
+ 
+ namespace coverage
+ {
+@@ -22,15 +23,31 @@ void OsiBlockCsvWriter::handle(OsiBlock record)
+ 
+     //target_ulong curr_proc_base;
+     //curr_proc_base = get_start_code();
+-    target_ulong bb_offset;
++    //target_ulong bb_offset;
++    target_ptr_t* bb_info;
++    target_ptr_t vma_dentry;
++    char *d_name = NULL;
++    char temp[] = {'n','/','a', '\0'};
++    std::tuple<target_ulong, target_ulong, target_ulong, target_ulong, std::string> bbs_info;
+ 
+     if (summarize_results) {
+         // If this is a new key, initialize it with an empty set
+-        cov_map.emplace(record.process_name, std::unordered_set<target_ulong>());
++        // cov_map.emplace(record.process_name, std::unordered_set<target_ulong>());
++        cov_map.emplace(record.process_name, std::unordered_set<std::tuple<target_ulong, target_ulong, target_ulong, target_ulong, std::string>, hash_function>());
+ 	
+-	bb_offset = get_start_lib(record.block.addr);
+-        cov_map[record.process_name].insert(bb_offset);
+-	/*
++	bb_info = get_start_lib(record.block.addr);
++    //bb_offset = bb_info[0];  
++    // cov_map[record.process_name].insert(bb_offset);
++    vma_dentry = get_the_dentry(bb_info[3]);
++    d_name = get_the_dentry_name(vma_dentry);
++    if (d_name == NULL) {
++        d_name = temp;
++    }
++	//std::cout << "Basic block with address 0x" << std::hex << bb_info[0] << " At the start of lib " << bb_info[1] << " with actual address " << bb_info[2] << "In lib or proc " << d_name << "\n";
++    bbs_info = std::make_tuple(bb_info[0], bb_info[1], bb_info[2], record.block.size, d_name);
++    cov_map[record.process_name].insert(bbs_info);
++
++    /*
+ 	bb_offset = record.block.addr - curr_proc_base;
+ 	if (bb_offset < 1048575) { // 0xfffff
+         	cov_map[record.process_name].insert(bb_offset);
+@@ -45,11 +62,20 @@ void OsiBlockCsvWriter::handle(OsiBlock record)
+             return;
+         }
+ 
++        bb_info = get_start_lib(record.block.addr);
++        vma_dentry = get_the_dentry(bb_info[3]);
++        d_name = get_the_dentry_name(vma_dentry);
++        if (d_name == NULL) {
++            d_name = temp;
++        }
++
+         os << record.process_name << ","
+             << std::dec << record.pid << ","
+             << std::dec << record.tid << ","
+             << std::dec << record.in_kernel << ","
+             << "0x" << std::hex << record.block.addr << ","
++            << "0x" << std::hex << bb_info[1] << ","
++            << "0x" << std::hex << d_name << ","
+             << std::dec << record.block.size << "\n";
+     }
+ }
+@@ -84,8 +110,7 @@ void OsiBlockCsvWriter::handle_disable()
+             size_t sz = it->second.size();
+             os << name << "," << std::dec << sz << "\n";
+ 	    for (const auto& elem: it->second) {
+-	    	os << "\t" << name << ","
+-			<< "0x" << std::hex << elem << "\n";
++	    	os << "\t" << "0x" << std::hex << std::get<0>(elem) << " 0x" << std::get<1>(elem)  << " 0x" << std::get<2>(elem) << " " << std::get<3>(elem) << " " <<        std::get<4>(elem) << "\n";
+ 	    }
+         }
+     }
+diff --git a/panda/plugins/coverage/OsiBlockCsvWriter.h b/panda/plugins/coverage/OsiBlockCsvWriter.h
+index 149df4a..de2b7b9 100644
+--- a/panda/plugins/coverage/OsiBlockCsvWriter.h
++++ b/panda/plugins/coverage/OsiBlockCsvWriter.h
+@@ -9,10 +9,19 @@
+ #include "CoverageMonitorDelegate.h"
+ #include "OsiBlock.h"
+ #include "RecordProcessor.h"
++#include <cstdlib>
+ 
+ namespace coverage
+ {
+ 
++struct hash_function
++{
++  size_t operator()(const std::tuple<target_ulong, 
++                    target_ulong , target_ulong, target_ulong, std::string>&x) const
++  {
++    return std::get<2>(x);
++  }
++};
+ 
+ 
+ /**
+@@ -31,7 +40,8 @@ private:
+     void write_header();
+     bool summarize_results;
+     std::ofstream os;
+-    std::unordered_map<std::string, std::unordered_set<target_ulong>> cov_map;
++    // std::unordered_map<std::string, std::unordered_set<target_ulong>> cov_map;
++    std::unordered_map<std::string, std::unordered_set<std::tuple<target_ulong, target_ulong, target_ulong, target_ulong, std::string>, hash_function>> cov_map;
+ };
+ 
+ }
+diff --git a/panda/plugins/osi_linux/osi_linux.cpp b/panda/plugins/osi_linux/osi_linux.cpp
+index 9575543..3b3de6e 100644
+--- a/panda/plugins/osi_linux/osi_linux.cpp
++++ b/panda/plugins/osi_linux/osi_linux.cpp
+@@ -599,37 +599,66 @@ target_ptr_t get_start_code() {
+ 	return mm_struct_start;
+ }
+ 
+-target_ptr_t get_start_lib(target_ulong lib_addr) {
++target_ptr_t* get_start_lib(target_ulong lib_addr) {
+ 	CPUState *cpu = qemu_get_cpu(0);
+ 	OsiProc *curr_proc;
+ 	target_ulong min = INT_MAX;
+ 	target_ptr_t vma_first, vma_current, vma_start;
++    target_ptr_t* result;
+ 
+ 	curr_proc = get_current_process(cpu);
+ 	
++    result = (target_ptr_t*) malloc(4* sizeof(target_ptr_t));   
+ 	//In interrupt?	
+ 	if (curr_proc == NULL) {
+-		return lib_addr;
++        result[0] = lib_addr;
++        result[1] = lib_addr;
++        result[2] = lib_addr;
++        result[3] = lib_addr;
++		return result;
+ 	}
+ 
+-	// Read the module info for the process.
+-	
+ 	vma_first = vma_current = get_vma_first(cpu, curr_proc->taskd);
+ 	if (vma_current == (target_ptr_t)NULL) { 
+-		return lib_addr;
++        result[0] = lib_addr;
++        result[1] = lib_addr;
++        result[2] = lib_addr;
++        result[3] = lib_addr;
++		return result;
+ 	}
+-
+ 	do {
+ 		vma_start = get_vma_start(cpu, vma_current);
+ 
+ 		if (lib_addr - vma_start < min && lib_addr - vma_start > 0) {
+ 			min = lib_addr - vma_start;
++            result[0] = min;
++            result[1] = vma_start;
++            result[2] = lib_addr;
++            result[3] = vma_current;
+ 		}
+ 		vma_current = get_vma_next(cpu, vma_current);
+ 	
+ 	} while(vma_current != (target_ptr_t)NULL && vma_current != vma_first);
+ 
+-	return min;
++	return result;
++}
++
++target_ptr_t get_the_dentry(target_ptr_t vma_area) {
++    CPUState *cpu = qemu_get_cpu(0);
++    target_ptr_t dentry;
++
++    dentry = get_vma_dentry(cpu, vma_area);
++
++    return dentry;
++}
++
++char* get_the_dentry_name(target_ptr_t vma_dentry) {
++    CPUState *cpu = qemu_get_cpu(0);
++    char* dname = NULL;
++
++    dname = read_dentry_name(cpu, vma_dentry);
++
++    return dname;
+ }
+ 
+ target_ptr_t ext_get_file_dentry(CPUState *env, target_ptr_t file_struct) {
+diff --git a/panda/plugins/osi_linux/osi_linux_int_fns.h b/panda/plugins/osi_linux/osi_linux_int_fns.h
+index e64cb90..89abe7a 100644
+--- a/panda/plugins/osi_linux/osi_linux_int_fns.h
++++ b/panda/plugins/osi_linux/osi_linux_int_fns.h
+@@ -15,7 +15,9 @@ char *osi_linux_fd_to_filename(CPUState *env, OsiProc *p, int fd);
+ 
+ //I dont know whats going on
+ target_ptr_t get_start_code(void);
+-target_ptr_t get_start_lib(target_ptr_t lib_addr);
++target_ptr_t* get_start_lib(target_ptr_t lib_addr);
++char* get_the_dentry_name(target_ptr_t dentry);
++target_ptr_t get_the_dentry(target_ptr_t vma_area);
+ 
+ // returns pos in a file 
+ unsigned long long osi_linux_fd_to_pos(CPUState *env, OsiProc *p, int fd);
+diff --git a/panda/plugins/syscall_to_mod_trace/syscall_to_mod_trace.cpp b/panda/plugins/syscall_to_mod_trace/syscall_to_mod_trace.cpp
+index 0a459b1..08a15ab 100644
+--- a/panda/plugins/syscall_to_mod_trace/syscall_to_mod_trace.cpp
++++ b/panda/plugins/syscall_to_mod_trace/syscall_to_mod_trace.cpp
+@@ -258,6 +258,7 @@ void add_hook(struct hook* h) {
+ 	if (h.low_bound >= hook_container.addr || h.upper_bound <= hook_container.addr) {\
+ 		continue;\
+ 	}\
++	/*printf("Module block address %llx is within the boundary %llx - %llx hooks_size %lld\n", (long long int)hook_container.addr, (long long int)h.low_bound, (long long int)h.upper_bound, temp_ ## NAME ## _hooks.size());*/\
+         auto the_hook = (hook*)&(h); \
+         if (likely(the_hook->enabled)){ \
+             if (the_hook->km == MODE_ANY || (in_kernel && the_hook->km == MODE_KERNEL_ONLY) || (!in_kernel && the_hook->km == MODE_USER_ONLY)){ \
+@@ -291,7 +292,7 @@ void cb_ ## NAME ## _callback PASSED_ARGS { \
+ 
+ #define MAKE_HOOK_VOID2(UPPER_CB_NAME, NAME, PASSED_ARGS, PC, ...) \
+ void cb_ ## NAME ## _callback PASSED_ARGS { \
+-    /*printf("VOID calling %llx guest_pc %llx\n", (long long unsigned int) panda_current_pc(cpu), (long long unsigned int)cpu->panda_guest_pc);*/\
++    /*printf("VOID calling %llx guest_pc %llx\n", (long long unsigned int) panda_current_pc(cpu), (long long unsigned int)cpu->panda_guest_pc); */\
+     HOOK_GENERIC_RET_EXPR2( (*(the_hook->cb.NAME))(__VA_ARGS__);, UPPER_CB_NAME, NAME, , hook_container.addr, PC) \
+ }
+ 
+-- 
+2.34.1
+

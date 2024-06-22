@@ -1,0 +1,1022 @@
+From 2840cc6c6b380f5f41230ac5a5417b4dc7c9baf2 Mon Sep 17 00:00:00 2001
+From: John <john.aggel3@gmail.com>
+Date: Sat, 4 Feb 2023 18:39:13 -0500
+Subject: [PATCH 1/5] Changes added for pandawan
+
+---
+ panda/plugins/config.panda                    |   2 +
+ panda/plugins/coverage/OsiBlockCsvWriter.cpp  |  26 +-
+ panda/plugins/coverage/coverage.cpp           |   3 +
+ panda/plugins/hooks/hooks_int_fns.h           |   3 +
+ panda/plugins/osi_linux/osi_linux.cpp         |  44 ++
+ panda/plugins/osi_linux/osi_linux.h           |  13 +-
+ panda/plugins/osi_linux/osi_linux_int_fns.h   |   4 +
+ .../osi_linux/utils/kernelinfo/kernelinfo.h   |   2 +
+ .../utils/kernelinfo/kernelinfo_read.c        |   2 +
+ panda/plugins/syscall_to_mod_trace/Makefile   |   9 +
+ panda/plugins/syscall_to_mod_trace/README.md  |  49 ++
+ .../syscall_to_mod_trace.cpp                  | 423 ++++++++++++++++++
+ .../syscall_switch_enter_linux_arm.cpp        |   4 +-
+ .../syscall_switch_enter_linux_mips.cpp       |   4 +-
+ .../generated/syscalls_ext_typedefs.h         |   3 +-
+ panda/plugins/syscalls2/syscalls2.cpp         |   5 +-
+ panda/plugins/syscalls2/syscalls2.h           |   1 +
+ .../syscalls_logger/syscalls_logger.cpp       |  13 +-
+ .../syscalls_logger/syscalls_logger.proto     |   7 +-
+ panda/python/core/create_panda_datatypes.py   |   1 +
+ panda/python/core/pandare/panda.py            |  71 +++
+ 21 files changed, 675 insertions(+), 14 deletions(-)
+ create mode 100644 panda/plugins/syscall_to_mod_trace/Makefile
+ create mode 100644 panda/plugins/syscall_to_mod_trace/README.md
+ create mode 100644 panda/plugins/syscall_to_mod_trace/syscall_to_mod_trace.cpp
+
+diff --git a/panda/plugins/config.panda b/panda/plugins/config.panda
+index 60b8166..0437f6d 100644
+--- a/panda/plugins/config.panda
++++ b/panda/plugins/config.panda
+@@ -48,3 +48,5 @@ trace
+ track_intexc
+ unigrams
+ wintrospection
++speedtest
++syscall_to_mod_trace
+diff --git a/panda/plugins/coverage/OsiBlockCsvWriter.cpp b/panda/plugins/coverage/OsiBlockCsvWriter.cpp
+index ef4c232..4068433 100644
+--- a/panda/plugins/coverage/OsiBlockCsvWriter.cpp
++++ b/panda/plugins/coverage/OsiBlockCsvWriter.cpp
+@@ -1,5 +1,7 @@
+ #include "OsiBlockCsvWriter.h"
+ #include "metadata_writer.h"
++#include "osi_linux/osi_linux_ext.h"
++#include <iostream>
+ 
+ namespace coverage
+ {
+@@ -17,11 +19,27 @@ OsiBlockCsvWriter::OsiBlockCsvWriter(const std::string &filename,
+ 
+ void OsiBlockCsvWriter::handle(OsiBlock record)
+ {
++
++    //target_ulong curr_proc_base;
++    //curr_proc_base = get_start_code();
++    target_ulong bb_offset;
++
+     if (summarize_results) {
+         // If this is a new key, initialize it with an empty set
+         cov_map.emplace(record.process_name, std::unordered_set<target_ulong>());
++	
++	bb_offset = get_start_lib(record.block.addr);
++        cov_map[record.process_name].insert(bb_offset);
++	/*
++	bb_offset = record.block.addr - curr_proc_base;
++	if (bb_offset < 1048575) { // 0xfffff
++        	cov_map[record.process_name].insert(bb_offset);
++	}
++	else {
++	}
++	*/
++        //cov_map[record.process_name].insert(record.block.addr);
+         // Set must exist now, add this block
+-        cov_map[record.process_name].insert(record.block.addr);
+     } else {
+         if (!os.is_open()) {
+             return;
+@@ -64,7 +82,11 @@ void OsiBlockCsvWriter::handle_disable()
+         for ( auto it = cov_map.begin(); it != cov_map.end(); ++it )  {
+             std::string name = it->first;
+             size_t sz = it->second.size();
+-            os << name << "," << sz << "\n";
++            os << name << "," << std::dec << sz << "\n";
++	    for (const auto& elem: it->second) {
++	    	os << "\t" << name << ","
++			<< "0x" << std::hex << elem << "\n";
++	    }
+         }
+     }
+     os.close();
+diff --git a/panda/plugins/coverage/coverage.cpp b/panda/plugins/coverage/coverage.cpp
+index d19ceb0..ab00c35 100644
+--- a/panda/plugins/coverage/coverage.cpp
++++ b/panda/plugins/coverage/coverage.cpp
+@@ -20,6 +20,7 @@ PANDAENDCOMMENT */
+ // OSI
+ #include "osi/osi_types.h"
+ #include "osi/osi_ext.h"
++#include "osi_linux/osi_linux_ext.h"
+ 
+ #include "PredicateBuilder.h"
+ 
+@@ -295,6 +296,8 @@ bool init_plugin(void *self)
+ 
+     pcb.after_loadvm = after_loadvm;
+     panda_register_callback(self, PANDA_CB_AFTER_LOADVM, pcb);
++	
++    if (!init_osi_linux_api()) return false;
+ 
+     return true;
+ }
+diff --git a/panda/plugins/hooks/hooks_int_fns.h b/panda/plugins/hooks/hooks_int_fns.h
+index 8127b3e..c5cc03d 100644
+--- a/panda/plugins/hooks/hooks_int_fns.h
++++ b/panda/plugins/hooks/hooks_int_fns.h
+@@ -46,6 +46,9 @@ typedef struct hook {
+     bool enabled;
+     struct symbol sym; //if an associated symbol exists
+     void* context;
++
++    target_ulong low_bound;
++    target_ulong upper_bound;
+ } hook;
+ 
+ 
+diff --git a/panda/plugins/osi_linux/osi_linux.cpp b/panda/plugins/osi_linux/osi_linux.cpp
+index 81d8e14..9575543 100644
+--- a/panda/plugins/osi_linux/osi_linux.cpp
++++ b/panda/plugins/osi_linux/osi_linux.cpp
+@@ -12,6 +12,7 @@
+ #include <map>
+ #include <unordered_set>
+ #include <glib.h>
++#include <iostream>
+ 
+ #include "panda/plugin.h"
+ #include "panda/plugin_plugin.h"
+@@ -587,6 +588,49 @@ end:
+     return filename;
+ }
+ 
++target_ptr_t get_start_code() {
++	CPUState *cpu = qemu_get_cpu(0);
++	target_ulong mm_struct_start;
++	target_ptr_t ts_current;
++
++	ts_current = kernel_profile->get_current_task_struct(cpu);
++	mm_struct_start = get_mm_start_code(cpu, ts_current);
++	
++	return mm_struct_start;
++}
++
++target_ptr_t get_start_lib(target_ulong lib_addr) {
++	CPUState *cpu = qemu_get_cpu(0);
++	OsiProc *curr_proc;
++	target_ulong min = INT_MAX;
++	target_ptr_t vma_first, vma_current, vma_start;
++
++	curr_proc = get_current_process(cpu);
++	
++	//In interrupt?	
++	if (curr_proc == NULL) {
++		return lib_addr;
++	}
++
++	// Read the module info for the process.
++	
++	vma_first = vma_current = get_vma_first(cpu, curr_proc->taskd);
++	if (vma_current == (target_ptr_t)NULL) { 
++		return lib_addr;
++	}
++
++	do {
++		vma_start = get_vma_start(cpu, vma_current);
++
++		if (lib_addr - vma_start < min && lib_addr - vma_start > 0) {
++			min = lib_addr - vma_start;
++		}
++		vma_current = get_vma_next(cpu, vma_current);
++	
++	} while(vma_current != (target_ptr_t)NULL && vma_current != vma_first);
++
++	return min;
++}
+ 
+ target_ptr_t ext_get_file_dentry(CPUState *env, target_ptr_t file_struct) {
+ 	return get_file_dentry(env, file_struct);
+diff --git a/panda/plugins/osi_linux/osi_linux.h b/panda/plugins/osi_linux/osi_linux.h
+index 92c11cd..7fdbb02 100644
+--- a/panda/plugins/osi_linux/osi_linux.h
++++ b/panda/plugins/osi_linux/osi_linux.h
+@@ -55,7 +55,7 @@ struct_get_ret_t struct_get(CPUState *cpu, T *v, target_ptr_t ptr, off_t offset)
+         return struct_get_ret_t::ERROR_DEREF;
+     }
+ 
+-    switch(panda_virtual_memory_read(cpu, ptr+offset, (uint8_t *)v, sizeof(T))) {
++    switch(panda_virtual_memory_rw(cpu, ptr+offset, (uint8_t *)v, sizeof(T), 0)) {
+         case -1:
+             memset((uint8_t *)v, 0, sizeof(T));
+             return struct_get_ret_t::ERROR_MEMORY;
+@@ -253,6 +253,13 @@ IMPLEMENT_OPTIONAL_OFFSET_GET(get_start_time, task_struct, uint64_t, ki.task.sta
+  */
+ IMPLEMENT_OFFSET_GET(get_mm_start_brk, mm_struct, target_ptr_t, ki.mm.start_brk_offset, 0)
+ 
++/**
++ * @brief Retrieves the address of the mm_struct from a task_struct.
++ */
++IMPLEMENT_OFFSET_GET(get_mm_start, task_struct, target_ptr_t, ki.task.mm_offset, 0)
++
++IMPLEMENT_OFFSET_GET2L(get_mm_start_code, task_struct, target_ptr_t, ki.task.mm_offset, target_ulong, ki.mm.start_code_offset, 0)
++
+ /**
+  * @brief Retrieves the address of the mm_struct from a task_struct.
+  */
+@@ -470,11 +477,13 @@ static inline char *read_dentry_name(CPUState *env, target_ptr_t dentry) {
+               printf("Warning: OSI_linux Unhandled pcomp value, ignoring\n");
+               break;
+         }
+-
++	
++	/*
+         if (pcomp_length > PATH_MAX){
+             printf("Error: OSI_linux pcomp length %d exceeds PATH_MAX. Check endianness.\n", pcomp_length);
+             assert(pcomp_length <= PATH_MAX);
+         }
++	*/
+         pcomp_length += 1; // space for string terminator
+ 
+         if (pcomp_capacity < pcomp_length) {
+diff --git a/panda/plugins/osi_linux/osi_linux_int_fns.h b/panda/plugins/osi_linux/osi_linux_int_fns.h
+index 780b351..e64cb90 100644
+--- a/panda/plugins/osi_linux/osi_linux_int_fns.h
++++ b/panda/plugins/osi_linux/osi_linux_int_fns.h
+@@ -13,6 +13,10 @@
+ // returns fd for a filename or a NULL if failed
+ char *osi_linux_fd_to_filename(CPUState *env, OsiProc *p, int fd);
+ 
++//I dont know whats going on
++target_ptr_t get_start_code(void);
++target_ptr_t get_start_lib(target_ptr_t lib_addr);
++
+ // returns pos in a file 
+ unsigned long long osi_linux_fd_to_pos(CPUState *env, OsiProc *p, int fd);
+ 
+diff --git a/panda/plugins/osi_linux/utils/kernelinfo/kernelinfo.h b/panda/plugins/osi_linux/utils/kernelinfo/kernelinfo.h
+index 7cfcb29..4311231 100644
+--- a/panda/plugins/osi_linux/utils/kernelinfo/kernelinfo.h
++++ b/panda/plugins/osi_linux/utils/kernelinfo/kernelinfo.h
+@@ -107,6 +107,8 @@ PACKED_STRUCT(mm_info) {
+ 	int start_brk_offset;
+ 	int brk_offset;
+ 	int start_stack_offset;
++	int start_code_offset;
++	int end_code_offset;
+ };
+ 
+ /**
+diff --git a/panda/plugins/osi_linux/utils/kernelinfo/kernelinfo_read.c b/panda/plugins/osi_linux/utils/kernelinfo/kernelinfo_read.c
+index f03d7a9..cd72c5d 100644
+--- a/panda/plugins/osi_linux/utils/kernelinfo/kernelinfo_read.c
++++ b/panda/plugins/osi_linux/utils/kernelinfo/kernelinfo_read.c
+@@ -163,6 +163,8 @@ int read_kernelinfo(gchar const *file, gchar const *group, struct kernelinfo *ki
+ 	READ_INFO_INT(ki, mm.start_brk_offset, gerr, err.mm, &errbmp);
+ 	READ_INFO_INT(ki, mm.brk_offset, gerr, err.mm, &errbmp);
+ 	READ_INFO_INT(ki, mm.start_stack_offset, gerr, err.mm, &errbmp);
++	READ_INFO_INT(ki, mm.start_code_offset, gerr, err.mm, &errbmp);
++	READ_INFO_INT(ki, mm.end_code_offset, gerr, err.mm, &errbmp);
+ 
+ 	/* read vma information */
+ 	READ_INFO_INT(ki, vma.size, gerr, err.vma, &errbmp);
+diff --git a/panda/plugins/syscall_to_mod_trace/Makefile b/panda/plugins/syscall_to_mod_trace/Makefile
+new file mode 100644
+index 0000000..f3982d8
+--- /dev/null
++++ b/panda/plugins/syscall_to_mod_trace/Makefile
+@@ -0,0 +1,9 @@
++# Don't forget to add your plugin to config.panda!
++
++# If you need custom CFLAGS or LIBS, set them up here
++# CFLAGS+=
++# LIBS+=
++
++# The main rule for your plugin. List all object-file dependencies.
++$(PLUGIN_TARGET_DIR)/panda_$(PLUGIN_NAME).so: \
++	$(PLUGIN_OBJ_DIR)/$(PLUGIN_NAME).o
+diff --git a/panda/plugins/syscall_to_mod_trace/README.md b/panda/plugins/syscall_to_mod_trace/README.md
+new file mode 100644
+index 0000000..bc925c7
+--- /dev/null
++++ b/panda/plugins/syscall_to_mod_trace/README.md
+@@ -0,0 +1,49 @@
++Plugin: Hooks
++===========
++
++Summary
++-------
++Plugin to call python functions (via pypanda) before executing code at a given address.
++
++Arguments
++---------
++
++Dependencies
++------------
++
++When using `add_symbol_hook` `dynamic_symbols` is required.
++
++APIs and Callbacks
++------------------
++
++```
++void add_hook(struct hook*)
++```
++
++This takes a struct hook pointer and enables callbacks as appropriate to provide the right callbacks for the hook.
++
++```
++void add_symbol_hook(struct symbol_hook*)
++```
++
++Symbol hooks are a different kind of hook. Instead of hooking library addresses they hook symbols: which are an optional library name and symbol name pairing. For example, if you provide "libc" and "_Exit" through the `struct symbol_hook*`, and a callback you will receive callbacks each time "_Exit" is called in "libc" upon future resolution of that symbol. Symbols are hooked for all programs so if unwanted make sure to check the proper program and disable as necessary.
++
++Hook Callbacks
++-------------
++
++The hook callbacks are available in several styles. They are essentially the same as the specified callback style, but they also contain a pointer to the relevant hook. For example, if we were to use the `before_block_exec` style it would look like:
++
++```
++void (*before_block_exec)(CPUState* env, TranslationBlock* tb, struct hook*);
++```
++
++Changes made to the hooks in callbacks are propagated. Hooks disabled are removed.
++
++
++struct hook
++------------
++
++The `hook` struct allows a user to set up a hook on any of several callbacks (see: `hooks_panda_cb`). They may specify the type with the `type` parameter. A basic hook will set a `start_addr` and an `end_addr` which covers a region in which callbacks should be triggered. Users may also specify an `asid` to filter on the basis of or specify that the `asid` is 0 to trigger on all asids. Users may also use `enum kernel_mode` to set `km` to filter on the basis of the kernel mode state. Lastly, users may set the `enable` boolean in the struct. Structs which are disabled after a user has seen them will never be used again and so are removed.
++
++Example
++-------
+diff --git a/panda/plugins/syscall_to_mod_trace/syscall_to_mod_trace.cpp b/panda/plugins/syscall_to_mod_trace/syscall_to_mod_trace.cpp
+new file mode 100644
+index 0000000..0a459b1
+--- /dev/null
++++ b/panda/plugins/syscall_to_mod_trace/syscall_to_mod_trace.cpp
+@@ -0,0 +1,423 @@
++/* PANDABEGINCOMMENT
++ * 
++ * Authors:
++ *  Luke Craig                  luke.craig@ll.mit.edu
++ *  Andrew Fasano               andrew.fasano@ll.mit.edu
++ *  Nick Gregory                ngregory@nyu.edu
++ * 
++ * This work is licensed under the terms of the GNU GPL, version 2. 
++ * See the COPYING file in the top-level directory. 
++ * 
++PANDAENDCOMMENT */
++
++// This needs to be defined before anything is included in order to get
++// the PRIx64 macro
++#define __STDC_FORMAT_MACROS
++
++#include "panda/plugin.h"
++#include "panda/common.h"
++#include "panda/tcg-utils.h"
++#include <iostream>
++#include <unordered_map>
++#include <osi/osi_types.h>
++#include <set>
++#include <queue>
++#include <vector>
++
++// These need to be extern "C" so that the ABI is compatible with
++// QEMU/PANDA, which is written in C
++extern "C" {
++bool init_plugin(void *);
++void uninit_plugin(void *);
++#include "dynamic_symbols/dynamic_symbols_int_fns.h"
++#include "hooks/hooks_int_fns.h"
++#include "exec/tb-hash.h"
++#include "translate-all.h"
++void hooks_flush_pc(target_ulong pc);
++}
++
++using namespace std;
++
++bool operator==(const struct hook &a, const struct hook &b){
++    return memcmp(&a, &b, sizeof(struct hook)) == 0;
++}
++
++#define NOT_EQUAL_RETURN_COND(A, B)  do {if (A != B) { return A < B;}} while (0)
++
++/*
++ * The set wants to know if our elements are the same. We only want
++ * this to happen in the case that our structs are actual duplicates.
++ * Otherwise we want them ordered by address and then asid and so on.
++ */
++bool operator<(const struct hook &a, const struct hook &b){
++    return tie(a.addr, a.asid, a.type, a.cb.before_block_exec) < tie(b.addr, b.asid, b.type, b.cb.before_block_exec);//, b.km, b.enabled);
++}
++
++#define SUPPORT_CALLBACK_TYPE(name) \
++    vector<struct hook> temp_ ## name ## _hooks; \
++    unordered_map<target_ulong, set<struct hook>> name ## _hooks; \
++    panda_cb name ## _callback;
++
++SUPPORT_CALLBACK_TYPE(before_tcg_codegen)
++SUPPORT_CALLBACK_TYPE(before_block_translate)
++SUPPORT_CALLBACK_TYPE(after_block_translate)
++SUPPORT_CALLBACK_TYPE(before_block_exec_invalidate_opt)
++SUPPORT_CALLBACK_TYPE(before_block_exec)
++SUPPORT_CALLBACK_TYPE(after_block_exec)
++SUPPORT_CALLBACK_TYPE(start_block_exec)
++SUPPORT_CALLBACK_TYPE(end_block_exec)
++
++panda_cb before_block_translate_block_invalidator_callback;
++
++// Handle to self
++void* self = NULL;
++
++// Enable and disable callbacks
++void enable_hooking() {
++    assert(self != NULL);
++    panda_enable_callback(self, PANDA_CB_BEFORE_TCG_CODEGEN, before_tcg_codegen_callback);
++    panda_enable_callback(self, PANDA_CB_BEFORE_BLOCK_TRANSLATE, before_block_translate_callback);
++    panda_enable_callback(self, PANDA_CB_AFTER_BLOCK_TRANSLATE, after_block_translate_callback);
++    panda_enable_callback(self, PANDA_CB_BEFORE_BLOCK_EXEC_INVALIDATE_OPT, before_block_exec_invalidate_opt_callback);
++    panda_enable_callback(self, PANDA_CB_BEFORE_BLOCK_EXEC, before_block_exec_callback);
++    panda_enable_callback(self, PANDA_CB_AFTER_BLOCK_EXEC, after_block_exec_callback);
++    panda_enable_callback(self, PANDA_CB_START_BLOCK_EXEC, start_block_exec_callback);
++    panda_enable_callback(self, PANDA_CB_END_BLOCK_EXEC, end_block_exec_callback);
++}
++
++void disable_hooking() {
++    assert(self != NULL);
++    panda_disable_callback(self, PANDA_CB_BEFORE_TCG_CODEGEN, before_tcg_codegen_callback);
++    panda_disable_callback(self, PANDA_CB_BEFORE_BLOCK_TRANSLATE, before_block_translate_callback);
++    panda_disable_callback(self, PANDA_CB_AFTER_BLOCK_TRANSLATE, after_block_translate_callback);
++    panda_disable_callback(self, PANDA_CB_BEFORE_BLOCK_EXEC_INVALIDATE_OPT, before_block_exec_invalidate_opt_callback);
++    panda_disable_callback(self, PANDA_CB_BEFORE_BLOCK_EXEC, before_block_exec_callback);
++    panda_disable_callback(self, PANDA_CB_AFTER_BLOCK_EXEC, after_block_exec_callback);
++    panda_disable_callback(self, PANDA_CB_START_BLOCK_EXEC, start_block_exec_callback);
++    panda_disable_callback(self, PANDA_CB_END_BLOCK_EXEC, end_block_exec_callback);
++}
++
++vector<pair<hooks_panda_cb, panda_cb_type>> symbols_to_handle;
++
++
++void handle_hook_return (CPUState *cpu, struct hook_symbol_resolve *sh, struct symbol s, OsiModule* m){
++    int id = sh->id;
++    pair<hooks_panda_cb,panda_cb_type> resolved = symbols_to_handle[id];
++    //printf("handle_hook_return @ 0x%llx for \"%s\" in \"%s\" @ 0x%llx ASID: 0x%llx offset: 0x%llx\n", (long long unsigned int)rr_get_guest_instr_count(), s.name, s.section, (long long unsigned int) s.address, (long long unsigned int) panda_current_asid(cpu), (long long unsigned int) s.address - m->base);
++    struct hook new_hook;
++    new_hook.addr = s.address;
++    new_hook.asid = panda_current_asid(cpu);
++    new_hook.type = resolved.second; 
++    new_hook.km = MODE_USER_ONLY;
++    new_hook.cb = resolved.first;
++    new_hook.enabled = true;
++    memcpy(&new_hook.sym, &s, sizeof(struct symbol));
++    add_hook(&new_hook);
++}
++
++void add_symbol_hook(struct symbol_hook* h){
++    pair<hooks_panda_cb, panda_cb_type> p (h->cb, h->type);
++    struct hook_symbol_resolve sh;
++    sh.enabled = true;
++    sh.cb = handle_hook_return;
++    symbols_to_handle.push_back(p);
++    sh.id = symbols_to_handle.size() - 1;
++    sh.hook_offset = h->offset;
++    if (h->hook_offset){
++        sh.offset = h->offset;
++        memset((void*) &sh.name, 0, sizeof(sh.name));
++    }else{
++        memcpy((void*) &sh.name, (void*) &h->name, sizeof(sh.name));
++    }
++    memcpy((void*) &sh.section,(void*) &h->section, sizeof(sh.section));
++    void* dynamic_symbols = panda_get_plugin_by_name("dynamic_symbols");
++    if (dynamic_symbols == NULL){
++        panda_require("dynamic_symbols");
++        dynamic_symbols = panda_get_plugin_by_name("dynamic_symbols");
++    }
++    if (dynamic_symbols != NULL){
++        void (*hook_symbol_resolution_dlsym)(struct hook_symbol_resolve*) = (void(*)(struct hook_symbol_resolve*)) dlsym(dynamic_symbols, "hook_symbol_resolution");
++        if ((void*)hook_symbol_resolution_dlsym != NULL) {
++            hook_symbol_resolution_dlsym(&sh);
++        }
++    }
++}
++
++#define ADD_CALLBACK_TYPE(TYPE, TYPE_UPPER) \
++    case PANDA_CB_ ## TYPE_UPPER: \
++        temp_## TYPE ## _hooks.push_back(*h); \
++        panda_enable_callback(self, PANDA_CB_ ## TYPE_UPPER , TYPE ## _callback); \
++        break;
++
++bool first_tb_chaining = false;
++set<target_ulong> pcs_to_flush;
++
++void hooks_flush_pc(target_ulong pc){
++    pcs_to_flush.insert(pc);
++    panda_enable_callback(self, PANDA_CB_BEFORE_BLOCK_TRANSLATE, before_block_translate_block_invalidator_callback);
++}
++
++void before_block_translate_invalidator(CPUState* cpu, target_ulong pc_val){
++    assert(cpu != (CPUState*)NULL && "Cannot register TCG-based hooks before guest is created. Try this in after_machine_init CB");
++    CPUArchState *env = (CPUArchState *)cpu->env_ptr;
++    target_ulong pc, cs_base;
++    uint32_t flags;
++    cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
++    set<target_ulong>::iterator it = pcs_to_flush.begin();
++    while (it != pcs_to_flush.end()){
++        target_ulong pc_target = *it;
++        uint32_t h = tb_jmp_cache_hash_func(pc_target);
++        TranslationBlock *tb = atomic_read(&cpu->tb_jmp_cache[h]);
++        if (unlikely(tb && tb->pc == pc_target && tb->cs_base == cs_base)){
++            tb_phys_invalidate(tb, tb->page_addr[0]);
++            atomic_set(&cpu->tb_jmp_cache[h], NULL);
++            it = pcs_to_flush.erase(it);
++            continue;
++        }
++        ++it;
++    }
++    if (pcs_to_flush.empty())
++        panda_disable_callback(self, PANDA_CB_BEFORE_BLOCK_TRANSLATE, before_block_translate_block_invalidator_callback);
++}
++
++void add_hook(struct hook* h) {
++    if (h->type != PANDA_CB_BEFORE_TCG_CODEGEN && !first_tb_chaining){
++        // if we ever register a non tcg_codegen we must disable tb chaining
++        panda_disable_tb_chaining();
++        first_tb_chaining = true;
++    }
++    if (h->type == PANDA_CB_BEFORE_TCG_CODEGEN){
++        hooks_flush_pc(h->addr);
++    }
++    switch (h->type){
++        ADD_CALLBACK_TYPE(before_tcg_codegen, BEFORE_TCG_CODEGEN)
++        ADD_CALLBACK_TYPE(before_block_translate, BEFORE_BLOCK_TRANSLATE)
++        ADD_CALLBACK_TYPE(after_block_translate, AFTER_BLOCK_TRANSLATE)
++        ADD_CALLBACK_TYPE(before_block_exec_invalidate_opt, BEFORE_BLOCK_EXEC_INVALIDATE_OPT)
++        ADD_CALLBACK_TYPE(before_block_exec, BEFORE_BLOCK_EXEC)
++        ADD_CALLBACK_TYPE(after_block_exec, AFTER_BLOCK_EXEC)
++        ADD_CALLBACK_TYPE(start_block_exec, START_BLOCK_EXEC)
++        ADD_CALLBACK_TYPE(end_block_exec, END_BLOCK_EXEC)
++        default:
++            printf("couldn't find hook type. Invalid %d\n", (int) h->type);
++    }
++}
++
++#define MAKE_HOOK_FN_START(UPPER_CB_NAME, NAME, VALUE, PC) \
++    if (unlikely(! temp_ ## NAME ## _hooks .empty())){ \
++        for (auto &h: temp_ ## NAME ## _hooks) { \
++            NAME ## _hooks[h.asid].insert(h); \
++        } \
++        temp_ ## NAME ## _hooks .clear(); \
++    } \
++    if (unlikely(NAME ## _hooks .empty())){ \
++        panda_disable_callback(self, PANDA_CB_ ## UPPER_CB_NAME, NAME ## _callback); \
++        return VALUE; \
++    } \
++    target_ulong asid = panda_current_asid(cpu); \
++    bool in_kernel = panda_in_kernel(cpu); \
++    struct hook hook_container; \
++    memset(&hook_container, 0, sizeof(hook_container)); \
++    hook_container.addr = PC; \
++    set<struct hook>::iterator it;
++
++#define MAKE_HOOK_FN_START2(UPPER_CB_NAME, NAME, VALUE, PC) \
++    if (unlikely( temp_ ## NAME ## _hooks .empty())){ \
++        panda_disable_callback(self, PANDA_CB_ ## UPPER_CB_NAME, NAME ## _callback); \
++        return VALUE; \
++    } \
++    target_ulong asid = panda_current_asid(cpu); \
++    bool in_kernel = panda_in_kernel(cpu); \
++    struct hook hook_container; \
++    memset(&hook_container, 0, sizeof(hook_container)); \
++    hook_container.addr = PC; \
++
++#define LOOP_ASID_CHECK(NAME, EXPR, COMPARATOR_TO_BLOCK)\
++    hook_container.asid = asid; \
++    it = NAME ## _hooks[asid].lower_bound(hook_container); \
++    while(it != NAME ## _hooks[asid].end() && it->addr COMPARATOR_TO_BLOCK){ \
++        auto h = (hook*)&(*it); \
++        if (likely(h->enabled)){ \
++            if (h->asid == asid){ \
++                if (h->km == MODE_ANY || (in_kernel && h->km == MODE_KERNEL_ONLY) || (!in_kernel && h->km == MODE_USER_ONLY)){ \
++                    EXPR \
++                    if (!h->enabled){ \
++                        it = NAME ## _hooks[asid].erase(it); \
++                        continue; \
++                    } \
++                    /*memcpy((void*)&(*it), (void*)&h, sizeof(struct hook));*/ \
++                } \
++            } \
++        }\
++        ++it; \
++    }
++
++//while(it != NAME ## _hooks[asid].end() && it->low_bound <= hook_container.addr && it->upper_bound >= hook_container.addr){ 
++#define LOOP_ASID_CHECK2(NAME, EXPR)\
++    for (auto &h: temp_ ## NAME ## _hooks) { \
++	if (h.low_bound >= hook_container.addr || h.upper_bound <= hook_container.addr) {\
++		continue;\
++	}\
++        auto the_hook = (hook*)&(h); \
++        if (likely(the_hook->enabled)){ \
++            if (the_hook->km == MODE_ANY || (in_kernel && the_hook->km == MODE_KERNEL_ONLY) || (!in_kernel && the_hook->km == MODE_USER_ONLY)){ \
++               EXPR \
++            } \
++        }\
++    }
++
++#define HOOK_GENERIC_RET_EXPR(EXPR, UPPER_CB_NAME, NAME, VALUE, COMPARATOR_TO_BLOCK, PC) \
++    MAKE_HOOK_FN_START(UPPER_CB_NAME, NAME, VALUE, PC) \
++    LOOP_ASID_CHECK(NAME, EXPR, COMPARATOR_TO_BLOCK) \
++    if (asid != 0){ \
++        asid = 0; \
++        LOOP_ASID_CHECK(NAME, EXPR, COMPARATOR_TO_BLOCK) \
++    }
++
++#define HOOK_GENERIC_RET_EXPR2(EXPR, UPPER_CB_NAME, NAME, VALUE, COMPARATOR_TO_BLOCK, PC) \
++    MAKE_HOOK_FN_START2(UPPER_CB_NAME, NAME, VALUE, PC) \
++    LOOP_ASID_CHECK2(NAME, EXPR) \
++    if (asid != 0){ \
++        asid = 0; \
++        LOOP_ASID_CHECK2(NAME, EXPR) \
++    }
++
++
++#define MAKE_HOOK_VOID(UPPER_CB_NAME, NAME, PASSED_ARGS, PC, ...) \
++void cb_ ## NAME ## _callback PASSED_ARGS { \
++    /*printf("VOID calling %llx guest_pc %llx\n", (long long unsigned int) panda_current_pc(cpu), (long long unsigned int)cpu->panda_guest_pc);*/\
++    HOOK_GENERIC_RET_EXPR( (*(h->cb.NAME))(__VA_ARGS__);, UPPER_CB_NAME, NAME, , == hook_container.addr, PC) \
++}
++
++#define MAKE_HOOK_VOID2(UPPER_CB_NAME, NAME, PASSED_ARGS, PC, ...) \
++void cb_ ## NAME ## _callback PASSED_ARGS { \
++    /*printf("VOID calling %llx guest_pc %llx\n", (long long unsigned int) panda_current_pc(cpu), (long long unsigned int)cpu->panda_guest_pc);*/\
++    HOOK_GENERIC_RET_EXPR2( (*(the_hook->cb.NAME))(__VA_ARGS__);, UPPER_CB_NAME, NAME, , hook_container.addr, PC) \
++}
++
++// first level hook that goes to other hooks?
++
++#define MAKE_HOOK_BOOL(UPPER_CB_NAME, NAME, PASSED_ARGS, PC, ...) \
++bool cb_ ## NAME ## _callback PASSED_ARGS { \
++    bool ret = false; \
++    HOOK_GENERIC_RET_EXPR(ret |= (*(h->cb.NAME))(__VA_ARGS__);, UPPER_CB_NAME, NAME, false, == hook_container.addr, PC) \
++    return ret; \
++}
++    
++void cb_tcg_codegen_middle_filter(CPUState* cpu, TranslationBlock *tb) {
++    HOOK_GENERIC_RET_EXPR(/*printf("TCG calling %llx from %llx with hook %llx guest_pc %llx\n", (long long unsigned int) panda_current_pc(cpu), (long long unsigned int)tb->pc, (long long unsigned int)h->addr, (long long unsigned int)cpu->panda_guest_pc); printf("made it to hook %p\n", (void*)h->cb.before_block_exec);*/ (*(h->cb.before_tcg_codegen))(cpu, tb, h);, BEFORE_TCG_CODEGEN, before_tcg_codegen, , < tb->pc + tb->size, tb->pc );
++}
++
++void cb_before_tcg_codegen_callback (CPUState* cpu, TranslationBlock *tb) {
++    if (unlikely(! temp_before_tcg_codegen_hooks.empty())){
++        for (auto &h: temp_before_tcg_codegen_hooks) {
++            before_tcg_codegen_hooks[h.asid].insert(h);
++        }
++        temp_before_tcg_codegen_hooks.clear();
++    }
++    if (unlikely(before_tcg_codegen_hooks.empty())){
++        panda_disable_callback(self, PANDA_CB_BEFORE_TCG_CODEGEN, before_tcg_codegen_callback);
++    }
++    bool in_kernel = panda_in_kernel(cpu);
++    struct hook hook_container;
++    set<target_ulong> inserted_addresses;
++    memset(&hook_container, 0, sizeof(hook_container));
++    hook_container.addr = tb->pc;
++    TCGOp *first_instr = NULL;
++    for (auto& a : before_tcg_codegen_hooks){
++        target_ulong asid = a.first;
++        set<struct hook>::iterator it;
++        hook_container.asid = asid;
++        it = before_tcg_codegen_hooks[asid].lower_bound(hook_container); 
++        while(it != before_tcg_codegen_hooks[asid].end() && it->addr < tb->pc + tb->size){
++            auto h = (hook*)&(*it);
++            if (likely(h->enabled)){
++                if (h->asid == asid){ 
++                    if (h->km == MODE_ANY || (in_kernel && h->km == MODE_KERNEL_ONLY) || (!in_kernel && h->km == MODE_USER_ONLY)){
++                        auto exclude = inserted_addresses.find(h->addr);
++                        if (exclude == inserted_addresses.end()){
++                            TCGOp* op = NULL;
++                            if (h->addr == tb->pc){
++                                if (!first_instr) {
++                                    first_instr = find_first_guest_insn();
++                                }
++                                op = first_instr;
++                            }else{
++                                op = find_guest_insn_by_addr(h->addr);
++                            }
++                            if (op != NULL){
++                                insert_call(&op, cb_tcg_codegen_middle_filter, cpu, tb);
++                                inserted_addresses.insert(h->addr);
++                            }
++                        } 
++                    }
++                } 
++            }else{
++                printf("erasing hook\n");
++                it = before_tcg_codegen_hooks[asid].erase(it);
++                continue;
++            }
++            ++it;
++        }
++    }
++}
++
++
++MAKE_HOOK_VOID(BEFORE_BLOCK_TRANSLATE, before_block_translate, (CPUState *cpu, target_ulong pc), panda_current_pc(cpu), cpu, pc, h)
++
++MAKE_HOOK_VOID(AFTER_BLOCK_TRANSLATE, after_block_translate, (CPUState *cpu, TranslationBlock *tb), tb->pc, cpu, tb, h)
++
++MAKE_HOOK_BOOL(BEFORE_BLOCK_EXEC_INVALIDATE_OPT, before_block_exec_invalidate_opt, (CPUState* cpu, TranslationBlock* tb), tb->pc, cpu, tb, h)
++
++//MAKE_HOOK_VOID(BEFORE_BLOCK_EXEC, before_block_exec, (CPUState *cpu, TranslationBlock *tb), tb->pc, cpu, tb, h)
++MAKE_HOOK_VOID2(BEFORE_BLOCK_EXEC, before_block_exec, (CPUState *cpu, TranslationBlock *tb), tb->pc, cpu, tb, the_hook)
++
++MAKE_HOOK_VOID(AFTER_BLOCK_EXEC, after_block_exec, (CPUState *cpu, TranslationBlock *tb, uint8_t exitCode), tb->pc, cpu, tb, exitCode, h)
++
++//MAKE_HOOK_VOID(START_BLOCK_EXEC, start_block_exec, (CPUState *cpu, TranslationBlock *tb), tb->pc, cpu, tb, h)
++MAKE_HOOK_VOID2(START_BLOCK_EXEC, start_block_exec, (CPUState *cpu, TranslationBlock *tb), tb->pc, cpu, tb, the_hook)
++
++MAKE_HOOK_VOID(END_BLOCK_EXEC, end_block_exec, (CPUState *cpu, TranslationBlock *tb), tb->pc, cpu, tb, h)
++
++void erase_asid(target_ulong asid){
++    before_tcg_codegen_hooks.erase(asid);
++    before_block_translate_hooks.erase(asid);
++    after_block_translate_hooks.erase(asid);
++    before_block_exec_invalidate_opt_hooks.erase(asid);
++    before_block_exec_hooks.erase(asid);
++    after_block_exec_hooks.erase(asid);
++    start_block_exec_hooks.erase(asid);
++    end_block_exec_hooks.erase(asid);
++}
++
++#define REGISTER_AND_DISABLE_CALLBACK(SELF, NAME, NAME_UPPER)\
++    NAME ## _callback. NAME  = cb_ ## NAME ## _callback; \
++    panda_register_callback(SELF, PANDA_CB_ ## NAME_UPPER, NAME ## _callback); \
++    panda_disable_callback(SELF, PANDA_CB_ ## NAME_UPPER, NAME ## _callback);
++
++bool init_plugin(void *_self) {
++    // On init, register a callback but don't enable it
++    self = _self;
++    panda_enable_precise_pc();
++
++    REGISTER_AND_DISABLE_CALLBACK(_self, before_tcg_codegen, BEFORE_TCG_CODEGEN)
++    REGISTER_AND_DISABLE_CALLBACK(_self, before_block_translate, BEFORE_BLOCK_TRANSLATE)
++    REGISTER_AND_DISABLE_CALLBACK(_self, after_block_translate, AFTER_BLOCK_TRANSLATE)
++    REGISTER_AND_DISABLE_CALLBACK(_self, before_block_exec_invalidate_opt, BEFORE_BLOCK_EXEC_INVALIDATE_OPT)
++    REGISTER_AND_DISABLE_CALLBACK(_self, before_block_exec, BEFORE_BLOCK_EXEC)
++    REGISTER_AND_DISABLE_CALLBACK(_self, after_block_exec, AFTER_BLOCK_EXEC)
++    REGISTER_AND_DISABLE_CALLBACK(_self, start_block_exec, START_BLOCK_EXEC)
++    REGISTER_AND_DISABLE_CALLBACK(_self, end_block_exec, END_BLOCK_EXEC)
++    
++    before_block_translate_block_invalidator_callback.before_block_translate = before_block_translate_invalidator; 
++    panda_register_callback(_self, PANDA_CB_BEFORE_BLOCK_TRANSLATE, before_block_translate_block_invalidator_callback);
++    panda_disable_callback(_self, PANDA_CB_BEFORE_BLOCK_TRANSLATE, before_block_translate_block_invalidator_callback);
++    return true;
++}
++
++void uninit_plugin(void *self) {
++    // if we don't clear tb's when this exits we have TBs which can call
++    // into our exited plugin.
++    panda_do_flush_tb();
++    disable_hooking();
++}
+diff --git a/panda/plugins/syscalls2/generated/syscall_switch_enter_linux_arm.cpp b/panda/plugins/syscalls2/generated/syscall_switch_enter_linux_arm.cpp
+index bd5c554..cf2913f 100644
+--- a/panda/plugins/syscalls2/generated/syscall_switch_enter_linux_arm.cpp
++++ b/panda/plugins/syscalls2/generated/syscall_switch_enter_linux_arm.cpp
+@@ -34,6 +34,8 @@ void syscall_enter_switch_linux_arm(CPUState *cpu, target_ptr_t pc, int static_c
+ 	ctx.asid = panda_current_asid(cpu);
+ 	ctx.retaddr = calc_retaddr(cpu, pc);
+ 	ctx.double_return = false;
++	current_syscall++;
++	ctx.syscall_id = current_syscall;
+ 	bool panda_noreturn;	// true if PANDA should not track the return of this system call
+ 	const syscall_info_t *call = NULL;
+ 	syscall_info_t zero = {0};
+@@ -5390,4 +5392,4 @@ void syscall_enter_switch_linux_arm(CPUState *cpu, target_ptr_t pc, int static_c
+ #endif
+ }
+ 
+-/* vim: set tabstop=4 softtabstop=4 noexpandtab ft=cpp: */
+\ No newline at end of file
++/* vim: set tabstop=4 softtabstop=4 noexpandtab ft=cpp: */
+diff --git a/panda/plugins/syscalls2/generated/syscall_switch_enter_linux_mips.cpp b/panda/plugins/syscalls2/generated/syscall_switch_enter_linux_mips.cpp
+index d3f5a01..426debc 100644
+--- a/panda/plugins/syscalls2/generated/syscall_switch_enter_linux_mips.cpp
++++ b/panda/plugins/syscalls2/generated/syscall_switch_enter_linux_mips.cpp
+@@ -34,6 +34,8 @@ void syscall_enter_switch_linux_mips(CPUState *cpu, target_ptr_t pc, int static_
+ 	ctx.asid = panda_current_asid(cpu);
+ 	ctx.retaddr = calc_retaddr(cpu, pc);
+ 	ctx.double_return = false;
++	current_syscall++;
++	ctx.syscall_id = current_syscall;
+ 	bool panda_noreturn;	// true if PANDA should not track the return of this system call
+ 	const syscall_info_t *call = NULL;
+ 	syscall_info_t zero = {0};
+@@ -6092,4 +6094,4 @@ void syscall_enter_switch_linux_mips(CPUState *cpu, target_ptr_t pc, int static_
+ #endif
+ }
+ 
+-/* vim: set tabstop=4 softtabstop=4 noexpandtab ft=cpp: */
+\ No newline at end of file
++/* vim: set tabstop=4 softtabstop=4 noexpandtab ft=cpp: */
+diff --git a/panda/plugins/syscalls2/generated/syscalls_ext_typedefs.h b/panda/plugins/syscalls2/generated/syscalls_ext_typedefs.h
+index 5585c18..66db4cc 100644
+--- a/panda/plugins/syscalls2/generated/syscalls_ext_typedefs.h
++++ b/panda/plugins/syscalls2/generated/syscalls_ext_typedefs.h
+@@ -44,6 +44,7 @@ struct syscall_ctx {
+     uint8_t args[GLOBAL_MAX_SYSCALL_ARGS]
+                 [GLOBAL_MAX_SYSCALL_ARG_SIZE]; /**< arguments */
+     bool double_return;
++    uint64_t syscall_id;
+ };
+ typedef struct syscall_ctx syscall_ctx_t;
+ 
+@@ -76,4 +77,4 @@ PPP_CB_TYPEDEF(void, on_unknown_sys_enter, CPUState *cpu, target_ulong pc, targe
+ PPP_CB_TYPEDEF(void, on_unknown_sys_return, CPUState *cpu, target_ulong pc, target_ulong callno);
+ // END_PYPANDA_NEEDS_THIS -- do not delete this comment!
+ 
+-/* vim: set tabstop=4 softtabstop=4 noexpandtab ft=cpp: */
+\ No newline at end of file
++/* vim: set tabstop=4 softtabstop=4 noexpandtab ft=cpp: */
+diff --git a/panda/plugins/syscalls2/syscalls2.cpp b/panda/plugins/syscalls2/syscalls2.cpp
+index 01ece9b..0376152 100644
+--- a/panda/plugins/syscalls2/syscalls2.cpp
++++ b/panda/plugins/syscalls2/syscalls2.cpp
+@@ -59,6 +59,8 @@ void registerExecPreCallback(void (*callback)(CPUState*, target_ulong));
+ #include "generated/syscall_ppp_register_return.cpp"
+ }
+ 
++uint64_t current_syscall;
++
+ // Forward declarations
+ int32_t get_s32_generic(CPUState *cpu, uint32_t argnum);
+ int64_t get_s64_generic(CPUState *cpu, uint32_t argnum);
+@@ -1122,7 +1124,8 @@ bool init_plugin(void *self) {
+     fprintf(stderr,"The syscalls plugin is not currently supported on this platform.\n");
+     return false;
+ #endif // x86/arm/mips
+-
++	
++    current_syscall = 0;
+     // Plugin is good to load - now let's clear the cache to make
+     // sure there aren't any previously-translated TCG blocks
+     // which already have (uninstrumented) syscalls.
+diff --git a/panda/plugins/syscalls2/syscalls2.h b/panda/plugins/syscalls2/syscalls2.h
+index 71a1b0b..7c48629 100644
+--- a/panda/plugins/syscalls2/syscalls2.h
++++ b/panda/plugins/syscalls2/syscalls2.h
+@@ -4,6 +4,7 @@ typedef struct CPUState CPUState;
+ typedef struct syscall_ctx syscall_ctx_t;
+ typedef std::map<std::pair<target_ptr_t, target_ptr_t>, syscall_ctx_t> context_map_t;
+ extern context_map_t running_syscalls;
++extern uint64_t current_syscall;
+ 
+ extern void (*hooks_add_hook)(struct hook*);
+ void hook_syscall_return(CPUState *cpu, TranslationBlock* tb, struct hook* h);
+diff --git a/panda/plugins/syscalls_logger/syscalls_logger.cpp b/panda/plugins/syscalls_logger/syscalls_logger.cpp
+index 5166caf..8e4d02a 100644
+--- a/panda/plugins/syscalls_logger/syscalls_logger.cpp
++++ b/panda/plugins/syscalls_logger/syscalls_logger.cpp
+@@ -614,7 +614,7 @@ void log_argument(CPUState* cpu, const syscall_info_t *call, int i, Panda__Named
+     bool know_buf_len = false;
+     uint64_t buf_len = 0;
+ 
+-    if (strcasestr(call->argn[i], "buf") != NULL // arg named buf
++    if (((strcasestr(call->argn[i], "buf") != NULL) || (strcasestr(call->argn[i], "optval") != NULL)) // arg named buf
+         && i < call->nargs-1 // has a next arg
+         && (strcasestr(call->argn[i+1], "size")  != NULL ||
+             strcasestr(call->argn[i+1], "len")   != NULL ||
+@@ -627,7 +627,13 @@ void log_argument(CPUState* cpu, const syscall_info_t *call, int i, Panda__Named
+         // e.g., sys_read which has the actual buffer size in the return value
+         if (strcmp(call->name, "sys_read") == 0) {
+           buf_len = get_syscall_retval(cpu);
+-        } else {
++	} else if (strcmp(call->name, "sys_setsockopt") == 0) {
++          buf_len = (uint64_t) call->argt[i+1];
++	  //printf("Syscall sys_setsockopt with optlen %lu\n", buf_len);
++	} else if (strcmp(call->name, "sys_getsockopt") == 0) {
++	  buf_len = (uint64_t) call->argt[i+1];
++	}
++	else {
+             switch (call->argt[i+1]) {
+               // Assume it will always be unsigned
+               case SYSCALL_ARG_U64:
+@@ -937,7 +943,8 @@ void handle_syscall(CPUState *cpu, target_ulong pc, const syscall_info_t *call,
+         }
+         psyscall.create_time = current->create_time;
+         psyscall.call_name = strdup(call->name);
+-
++	psyscall.syscall_id = rp->syscall_id;
++	
+         // If it's a bind, we only special case it if it's AF_INET/AF_INET6
+         target_ulong address_of_addr_in = 0;
+ 
+diff --git a/panda/plugins/syscalls_logger/syscalls_logger.proto b/panda/plugins/syscalls_logger/syscalls_logger.proto
+index cb6f314..6e4da7e 100644
+--- a/panda/plugins/syscalls_logger/syscalls_logger.proto
++++ b/panda/plugins/syscalls_logger/syscalls_logger.proto
+@@ -27,9 +27,10 @@ message Syscall {
+     required uint32 ppid = 2;
+     required uint32 tid = 3;
+     required uint64 create_time = 4;
+-    required int64 retcode = 5;
+-    required string call_name = 6;
+-    repeated NamedData args = 7;
++    required uint64 syscall_id = 5;
++    required int64 retcode = 6;
++    required string call_name = 7;
++    repeated NamedData args = 8;
+ }
+ 
+ optional Syscall syscall = 58;
+diff --git a/panda/python/core/create_panda_datatypes.py b/panda/python/core/create_panda_datatypes.py
+index 3e4a3ba..97bed3b 100755
+--- a/panda/python/core/create_panda_datatypes.py
++++ b/panda/python/core/create_panda_datatypes.py
+@@ -290,6 +290,7 @@ def compile(arch, bits, pypanda_headers, install, static_inc):
+             target_ptr_t retaddr; /**< return address */
+             uint8_t args[{GLOBAL_MAX_SYSCALL_ARG_SIZE}]
+                  [{GLOBAL_MAX_SYSCALL_ARG_SIZE}]; /**< arguments */
++                 uint64_t syscall_id;
+                  '''
+         +'''
+         } syscall_ctx_t;
+diff --git a/panda/python/core/pandare/panda.py b/panda/python/core/pandare/panda.py
+index eaa97cb..70df745 100644
+--- a/panda/python/core/pandare/panda.py
++++ b/panda/python/core/pandare/panda.py
+@@ -2912,6 +2912,77 @@ class Panda():
+         self.libpanda.cpu_breakpoint_remove(cpu, pc, BP_GDB)
+ 
+     ############# HOOKING MIXINS ###############
++    def syscall_to_mod_trace(self, addr, enabled=True, kernel=None, asid=None, cb_type="start_block_exec", low_bound=None, upper_bound=None):
++        '''
++        Decorate a function to setup a hook: when a guest goes to execute a basic block beginning with addr,
++        the function will be called with args (CPUState, TranslationBlock)
++        '''
++
++        def decorator(fun):
++            if cb_type == "before_tcg_codegen" or cb_type == "after_block_translate" or cb_type == "before_block_exec" or cb_type == "start_block_exec" or cb_type == "end_block_exec":
++                hook_cb_type = self.ffi.callback("void(CPUState*, TranslationBlock* , struct hook *)")
++            elif cb_type == "after_block_exec":
++                hook_cb_type = self.ffi.callback("void(CPUState*, TranslationBlock* , uint8_t, struct hook *)")
++            elif cb_type == "before_block_translate":
++                hook_cb_type = self.ffi.callback("void(CPUState* env, target_ptr_t pc, struct hook*)")
++            elif cb_type == "before_block_exec_invalidate_opt":
++                hook_cb_type = self.ffi.callback("bool(CPUState* env, TranslationBlock*, struct hook*)")
++            else:
++                print("function type not supported")
++                return
++            type_num = getattr(self.libpanda, "PANDA_CB_"+cb_type.upper())
++
++            if debug:
++                print("Registering breakpoint at 0x{:x} -> {} == {}".format(addr, fun, 'cdata_cb'))
++            
++            def _run_and_catch(*args, **kwargs): # Run function but if it raises an exception, stop panda and raise it
++                if not hasattr(self, "exit_exception"):
++                    try:
++                        r = fun(*args, **kwargs)
++                        #print(pandatype, type(r)) # XXX Can we use pandatype to determine requried return and assert if incorrect
++                        #assert(isinstance(r, int)), "Invalid return type?"
++                        #print(fun, r) # Stuck with TypeError in _run_and_catch? Enable this to find where the bug is.
++                        return r
++                    except Exception as e:
++                        # exceptions wont work in our thread. Therefore we print it here and then throw it after the
++                        # machine exits.
++                        if self.catch_exceptions:
++                            self.exit_exception = e
++                            self.end_analysis()
++                        else:
++                            raise e
++                        return 0
++            
++
++            # Inform the plugin that it has a new breakpoint at addr
++            hook_cb_passed = hook_cb_type(_run_and_catch)
++            new_hook = self.ffi.new("struct hook*")
++            if cb_type == "before_block_exec":
++                new_hook.low_bound = low_bound
++                new_hook.upper_bound = upper_bound
++            new_hook.type = type_num
++            new_hook.addr = addr
++            if kernel or asid is None:
++                new_hook.asid = 0
++            else:
++                new_hook.asid = asid
++
++            setattr(new_hook.cb,cb_type, hook_cb_passed)
++            if kernel:
++                new_hook.km = self.libpanda.MODE_KERNEL_ONLY
++            elif kernel == False:
++                new_hook.km = self.libpanda.MODE_USER_ONLY
++            else:
++                new_hook.km = self.libpanda.MODE_ANY
++            new_hook.enabled = enabled
++
++            self.plugins['syscall_to_mod_trace'].add_hook(new_hook)
++            self.hook_list.append((new_hook, hook_cb_passed))
++
++            def wrapper(*args, **kw):
++                return _run_and_catch(args,kw)
++            return wrapper
++        return decorator
+ 
+     def hook(self, addr, enabled=True, kernel=None, asid=None, cb_type="start_block_exec"):
+         '''
+-- 
+2.34.1
+
