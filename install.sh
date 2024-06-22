@@ -103,7 +103,7 @@ git clone --recursive -b pandawan https://github.com/BUseclab/FirmSolo.git ${INS
 cd ${INSTALL_DIR}
 
 # Install custom FirmAE version
-wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0/firmae.tar.gz
+wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0.0/firmae.tar.gz
 tar xvf firmae.tar.gz
 rm firmae.tar.gz
 cd FirmAE/ && ./download.sh
@@ -111,7 +111,7 @@ cd FirmAE/ && ./download.sh
 cd ${INSTALL_DIR}
 
 # Install custom Firmadyne version
-wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0/firmadyne.tar.gz
+wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0.0/firmadyne.tar.gz
 tar xvf firmadyne.tar.gz
 rm firmadyne.tar.gz
 cd firmadyne/ && ./download.sh
