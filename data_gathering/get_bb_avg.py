@@ -13,9 +13,9 @@ def get_data(infile):
     with open(infile,"r") as f:
         lines = f.readlines()
 
-    igloo_data = list(map(lambda x:x.strip("\n"), lines))
+    data = list(map(lambda x:x.strip("\n"), lines))
 
-    return igloo_data
+    return data
 
 def get_bbs_from_tool(data):
     tool, image = data[0], data[1]
