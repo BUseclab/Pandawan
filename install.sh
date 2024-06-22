@@ -106,11 +106,15 @@ cd ${INSTALL_DIR}
 wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0/firmae.tar.gz
 tar xvf firmae.tar.gz
 rm firmae.tar.gz
+cd FirmAE/ && ./download.sh
+
+cd ${INSTALL_DIR}
 
 # Install custom Firmadyne version
 wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0/firmadyne.tar.gz
 tar xvf firmadyne.tar.gz
 rm firmadyne.tar.gz
+cd firmadyne/ && ./download.sh
 
 pip3 install ply anytree sympy requests pexpect scipy Levenshtein
 
