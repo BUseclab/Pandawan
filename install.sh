@@ -73,7 +73,13 @@ python3 -m pip install psycopg2 psycopg2-binary
 sudo apt install -y busybox-static bash-static fakeroot dmsetup kpartx netcat-openbsd nmap python3-psycopg2 snmp uml-utilities util-linux vlan
 
 
+cd ${INSTALL_DIR}/Pandawan/emul_config/
+
+wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0.0/binaries.tar.gz
+tar xvf binaries.tar.gz && rm binaries.tar.gz
+
 cd ${INSTALL_DIR}
+
 # Install binwalk from FirmAE
 wget https://github.com/ReFirmLabs/binwalk/archive/refs/tags/v2.3.4.tar.gz && \
   tar -xf v2.3.4.tar.gz && \
@@ -130,17 +136,21 @@ git clone -b pandawan https://github.com/BUseclab/TriforceLinuxSyscallFuzzer.git
 
 cd ${INSTALL_DIR}
 
+#TODO: Dont run the install_ubuntu.sh script, just download all the packages needed
 git clone --recursive https://github.com/panda-re/panda.git && \
-	cd panda && git checkout ea682853034aeb5df110fec4e439420162d65c4f \
+	cd panda && \
+	./panda/scripts/install_ubuntu.sh 
+
+cd ${INSTALL_DIR}/panda && make clean && \
+	git checkout ea682853034aeb5df110fec4e439420162d65c4f && \
 	git apply ${INSTALL_DIR}/Pandawan/panda_patches/0001-Changes-added-for-pandawan.patch && \
 	git apply ${INSTALL_DIR}/Pandawan/panda_patches/0003-A-fix-for-syscalls_logger.patch && \
 	git apply ${INSTALL_DIR}/Pandawan/panda_patches/0005-Patch-coverage-plugin-to-print-info-about-the-origin.patch && \
-	./panda/scripts/install_ubuntu.sh && \
 	cd build && \
 	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rust.sh && \
 	chmod +x ./rust.sh && \
-	rust.sh -y && \
-	rustup toolchain install 1.66.1 && rustup default 1.66.1 \\
+	./rust.sh -y && source $HOME/.cargo/env && \
+	rustup toolchain install 1.66.1 && rustup default 1.66.1 && \
 	../build.sh --python
 
 # Set the symlinks for mips gcc-5
