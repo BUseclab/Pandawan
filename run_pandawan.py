@@ -137,14 +137,18 @@ class Pandawan(FirmSolo):
         # If the image string is an ID we assume that the image is already extracted
         # Else extract it using the extractor from FirmAE
         if not image_name.isnumeric():
-            iids = os.listdir(f"{cu.abs_path}/scratch/")
-            iid = iids.sort()[-1]
-            cwd = os.getcwd()
-            os.chdir("./emul_config/")
-            result = self.__run_config(image_name, iid, 0)
+            iids = os.listdir(f"{pt.output_dir}/scratch/")
+            iids = list(map (lambda x:int(x), iids))
+            iid = 1
+            try:
+                iid = str(int(sorted(iids)[-1]) + 1)
+            except:
+                print("Did not properly create an ID for the image")
+                sys.exit(1)
+            result = self.__run_config(image_name, iid)
             if not result:
                 return
-            os.chdir(cwd)
+            print("The image IID is", iid)
             super().__init__(iid)
         else:
             super().__init__(image_name)
@@ -169,6 +173,13 @@ class Pandawan(FirmSolo):
                 sb.run(cmd, shell=True)
             except:
                 print(f"Pandawan could not save the data (from dir {dir}) for {self.system} and {self.image} in {cu.abs_path}/{self.system}_results/{dir}. Are the directories present?")
+    
+    def cleanup_scratch(self):
+        cmd = f"rm -rf {pt.output_dir}/scratch/{self.image}/"
+        try:
+            sb.run(cmd, shell=True)
+        except:
+            print("Cleanup of the scratch dir for", self.image, "failed")
     
     def invoke_oracle(self):
         oracle = Oracle(self.image)
@@ -330,8 +341,11 @@ class Pandawan(FirmSolo):
                     print(f"Ran FirmSolo's dslc {self.times_run_dslc} times and Pandawan's subs {self.times_run_pw_subs} times")
 
         # Save the results for the respective system and image in the systems outdir
-        print("Saving system/image data...")
-        self.save_system_data()
+        if all_steps or steps:
+            print("Saving system/image data...")
+            self.save_system_data()
+            self.cleanup_scratch()
+        print("Done with image:", self.image)
 
     def get_arch(self):
         info = cu.get_image_info(self.image, "all")
@@ -427,17 +441,14 @@ class Pandawan(FirmSolo):
         
         return False #Failure
 
-    def __run_config(image_name, iid, mode):
+    def __run_config(self, image_name, iid):
 
-        if mode == 0:
-            cmd = f"./run.sh -e {image_name} {iid}"
-        else:
-            cmd = f"./run.sh -c {image_name} {iid}"
+        cmd = f"{pt.pandawan_dir}/emul_config/run.sh -e {image_name} {iid} {pt.pandawan_dir}"
 
         try:
             sb.run(cmd, shell = True)
         except:
-            print(f"Running FirmAE's networking and script configuration logic for {image_name} failed!")
+            print(f"Extracting {image_name} failed!")
             return False
         return True
 
@@ -514,10 +525,11 @@ def main():
         return
     
     pandawan = Pandawan(image, plugin_opts, system)
-    if not steps and not all_steps:
+    if image.isnumeric() and not steps and not all_steps:
         print("You have to set one of the options steps or all_steps (-t, -a) before running")
         return
-    pandawan.analyze_image(do_subs, all_steps, steps, timeout, firmsolo, firmae, firmadyne)
+    if steps or all_steps:
+        pandawan.analyze_image(do_subs, all_steps, steps, timeout, firmsolo, firmae, firmadyne)
 
 if __name__ == "__main__":
     main()

@@ -4,11 +4,8 @@ function print_usage()
 {
     echo "Usage: ${0} [mode]... [brand] [firmware|firmware_directory]"
     echo "mode: use one option at once"
-    echo "      -r, --run     : run mode         - run emulation (no quit)"
+    echo "      -e, --extract : extract mode     - extract the firmware image (Please provide the absolute path here)"
     echo "      -c, --check   : check mode       - check network reachable and web access (quit)"
-    echo "      -a, --analyze : analyze mode     - analyze vulnerability (quit)"
-    echo "      -d, --debug   : debug mode       - debugging emulation (no quit)"
-    echo "      -b, --boot    : boot debug mode  - kernel boot debugging using QEMU (no quit)"
 }
 
 if [ $# -ne 4 ]; then
@@ -95,7 +92,7 @@ chgrp -R "${USER}" "${WORK_DIR}"
 if [ ${OPTION} == "extract" ]; then
     FILENAME=`basename ${INFILE%.*}`
     echo $FILENAME > ${WORK_DIR}/name
-    python3 ${PANDAWAN_DIR}/sources/extractor/extractor.py -np -nk "$FILENAME" /tmp/${IID} | tee /tmp/log.txt
+    python3 ${PANDAWAN_DIR}/sources/extractor/extractor.py -np "$INFILE" /tmp/${IID}/ | tee /tmp/log.txt
     mv /tmp/${IID}/*.tar.gz ${TARBALL_DIR}/${IID}.tar.gz
 
     # ================================
@@ -107,22 +104,22 @@ if [ ${OPTION} == "extract" ]; then
     if [ -e ${WORK_DIR}/result ]; then
         if (egrep -sqi "true" ${WORK_DIR}/result); then
             RESULT=`cat ${WORK_DIR}/result`
-            return
+            exit 1
         fi
         rm ${WORK_DIR}/result
     fi
 
-    if [ ! -e ${TARBALL_DIR}/images/$IID.tar.gz ]; then
-        echo -e "[\033[31m-\033[0m] The root filesystem is not!"
+    if [ ! -e ${TARBALL_DIR}/$IID.tar.gz ]; then
+        echo -e "[\033[31m-\033[0m] The root filesystem is not extracted!"
         echo "extraction fail" > ${WORK_DIR}/result
-        return
+        exit 1
     fi
 
     echo "[*] extract done!!!"
     t_end="$(date -u +%s.%N)"
     time_extract="$(bc <<<"$t_end-$t_start")"
     echo $time_extract > ${WORK_DIR}/time_extract
-    return
+    exit 0
 fi
 # ================================
 # check architecture
