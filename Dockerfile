@@ -186,13 +186,15 @@ RUN git clone --recursive https://github.com/panda-re/panda.git ${INSTALL_DIR}/p
 		git apply ${INSTALL_DIR}/Pandawan/panda_patches/0005-Patch-coverage-plugin-to-print-info-about-the-origin.patch
 
 # Install rust
-RUN cd ${INSTALL_DIR}/panda && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rust.sh && \
+RUN cd ${INSTALL_DIR}/panda/build && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rust.sh && \
 		chmod +x ./rust.sh && \
 		./rust.sh -y
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-RUN rustup toolchain install 1.66.1 && \
+# Build PANDA
+RUN cd ${INSTALL_DIR}/panda/build && \
+		rustup toolchain install 1.66.1 && \
 		rustup default 1.66.1 && \
 		../build.sh --python
 
