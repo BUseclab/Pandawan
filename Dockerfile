@@ -183,13 +183,16 @@ RUN git clone --recursive https://github.com/panda-re/panda.git ${INSTALL_DIR}/p
 		git checkout ea682853034aeb5df110fec4e439420162d65c4f && \
 		git apply ${INSTALL_DIR}/Pandawan/panda_patches/0001-Changes-added-for-pandawan.patch && \
 		git apply ${INSTALL_DIR}/Pandawan/panda_patches/0003-A-fix-for-syscalls_logger.patch && \
-		git apply ${INSTALL_DIR}/Pandawan/panda_patches/0005-Patch-coverage-plugin-to-print-info-about-the-origin.patch && \
-		cd build && \
-		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rust.sh && \
+		git apply ${INSTALL_DIR}/Pandawan/panda_patches/0005-Patch-coverage-plugin-to-print-info-about-the-origin.patch
+
+# Install rust
+RUN cd ${INSTALL_DIR}/panda && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rust.sh && \
 		chmod +x ./rust.sh && \
-		./rust.sh -y && \
-		source $HOME/.cargo/env && \
-		rustup toolchain install 1.66.1 && \
+		./rust.sh -y
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN rustup toolchain install 1.66.1 && \
 		rustup default 1.66.1 && \
 		../build.sh --python
 
