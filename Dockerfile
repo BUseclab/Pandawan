@@ -130,8 +130,7 @@ RUN cd ${INSTALL_DIR} && \
 		wget https://github.com/devttys0/sasquatch/pull/51.patch && patch -p1 <51.patch && \
 		./build.sh && cd .. && \
 		echo y | ./deps.sh && \
-		python3 setup.py install && \
-		cp ${INSTALL_DIR}/Pandawan/emul_config/core/unstuff /usr/local/bin/
+		python3 setup.py install
 
 # Install FirmSolo
 RUN git clone --recursive -b pandawan https://github.com/BUseclab/FirmSolo.git ${INSTALL_DIR}/FirmSolo && \
@@ -206,7 +205,8 @@ RUN mkdir -p ${INSTALL_DIR}/Pandawan/emul_config && \
 cd ${INSTALL_DIR}/Pandawan/emul_config && \
 wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0.0/binaries.tar.gz && \
 tar xvf binaries.tar.gz && \
-rm binaries.tar.gz
+rm binaries.tar.gz && \
+cp ${INSTALL_DIR}/Pandawan/emul_config/core/unstuff /usr/local/bin/
 	
 	# Set working directory
 ENV INSTALL_DIR=${INSTALL_DIR}
