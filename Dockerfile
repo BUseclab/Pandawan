@@ -192,13 +192,21 @@ RUN cd ${INSTALL_DIR}/panda/build && curl --proto '=https' --tlsv1.2 -sSf https:
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Build PANDA
-RUN cd ${INSTALL_DIR}/panda/build && \
-		rustup toolchain install 1.66.1 && \
-		rustup default 1.66.1 && \
-		../build.sh --python
+RUN rustup toolchain install 1.66.1 && \
+rustup default 1.66.1
 
-# Set symlinks for mips gcc-5
+# Fixup Installation
+RUN apt install execstack -y && \
+	execstack -c /root/.rustup/toolchains/1.66.1-x86_64-unknown-linux-gnu/lib/libLLVM-15-rust-1.66.1-stable.so
+	
+RUN echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu focal main universe" >> /etc/apt/sources.list && \
+apt update && \
+apt install -y --allow-downgrades openssl=1.1.1f-1ubuntu2
+
+	# Build PANDA
+RUN cd ${INSTALL_DIR}/panda/build && \
+	../build.sh --python
+# # Set symlinks for mips gcc-5
 RUN ln -s /bin/mips-linux-gnu-gcc-5 /bin/mips-linux-gnu-gcc && \
 		ln -s /bin/mipsel-linux-gnu-gcc-5 /bin/mipsel-linux-gnu-gcc
 
