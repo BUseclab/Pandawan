@@ -1,6 +1,10 @@
 # Set the FirmSolo, Firmadyne, FirmAE and output directories here
-pandawan_dir = "/Pandawan/"
-firmsolo_dir = "/FirmSolo/"
-firmae_dir = "/FirmAE/"
-firmadyne_dir = "/firmadyne/"
-output_dir = "/output/"
+import os
+
+INSTALL_DIR = os.getenv("INSTALL_DIR") or "/"
+
+pandawan_dir = os.path.join(INSTALL_DIR, "Pandawan/")
+firmsolo_dir = os.path.join(INSTALL_DIR, "FirmSolo/")
+firmae_dir = os.path.join(INSTALL_DIR, "FirmAE/")
+firmadyne_dir = os.path.join(INSTALL_DIR, "firmadyne/")
+output_dir = os.path.join(INSTALL_DIR, "output/")

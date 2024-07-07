@@ -119,15 +119,6 @@ RUN python3 -m pip install --upgrade pip && \
 # Set the installation directory
 ARG INSTALL_DIR=/opt
 
-RUN cd ${INSTALL_DIR} && git clone --depth 1 --branch v1.0.0 https://github.com/BUseclab/Pandawan.git
-# Download and extract Pandawan binaries
-RUN mkdir -p ${INSTALL_DIR}/Pandawan/emul_config && \
-		cd ${INSTALL_DIR}/Pandawan/emul_config && \
-		wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0.0/binaries.tar.gz && \
-		tar xvf binaries.tar.gz && \
-		rm binaries.tar.gz
-
-
 # Install binwalk from FirmAE
 RUN cd ${INSTALL_DIR} && \
 		wget https://github.com/ReFirmLabs/binwalk/archive/refs/tags/v2.3.4.tar.gz && \
@@ -203,14 +194,22 @@ RUN echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu focal main universe"
 apt update && \
 apt install -y --allow-downgrades openssl=1.1.1f-1ubuntu2
 
-	# Build PANDA
+# Build PANDA
 RUN cd ${INSTALL_DIR}/panda/build && \
 	../build.sh --python
-# # Set symlinks for mips gcc-5
-RUN ln -s /bin/mips-linux-gnu-gcc-5 /bin/mips-linux-gnu-gcc && \
-		ln -s /bin/mipsel-linux-gnu-gcc-5 /bin/mipsel-linux-gnu-gcc
 
-# Set working directory
+# This step is last to allow caching on the previous layers
+ADD . ${INSTALL_DIR}/Pandawan
+
+# Download and extract Pandawan binaries
+RUN mkdir -p ${INSTALL_DIR}/Pandawan/emul_config && \
+cd ${INSTALL_DIR}/Pandawan/emul_config && \
+wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0.0/binaries.tar.gz && \
+tar xvf binaries.tar.gz && \
+rm binaries.tar.gz
+	
+	# Set working directory
+ENV INSTALL_DIR=${INSTALL_DIR}
 WORKDIR ${INSTALL_DIR}
 
 ENTRYPOINT ["/bin/bash", "-l", "-c"]

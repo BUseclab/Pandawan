@@ -18,7 +18,7 @@ https://doi.org/10.5281/zenodo.7865451
 
 Execute:
 
-```
+```bash
 docker load < firmsolo.tar.gz
 
 cd <pw_install_dir>/
@@ -30,7 +30,7 @@ Change `<pw_install_dir>` to the directory where you cloned Pandawan.
 
 **Running the docker**
 
-```
+```bash
 mkdir -p workdir
 
 cd workdir
@@ -41,7 +41,8 @@ docker run -v $(pwd):/output --rm -it --privileged pandawan /bin/bash
 It is assumed that your work directory (`<work_dir>`) is the current directory (`$(pwd)`)
 
 Inside the docker run:
-```
+
+```bash
 mkdir -p /output/images/
 echo core >/proc/sys/kernel/core_pattern
 cd /sys/devices/system/cpu
@@ -232,6 +233,12 @@ You will find the fuzzers output within: `<work_dir>/Fuzz_Results_Curr/1/`. We w
 
 To analyze firmware images besides our examples, you first need to extract their file-system and kernel.
 Then you can provide the path to the firmware image blob to Pandawan instead of an image ID to analyze the image. Once you run the experiments once you can continue using the ID that is created by Pandawan afterwards. 
+
+## Example
+
+```bash
+run_pandawan.py images/"firmware blob" --all --do_subs --firmsolo --global_timeout 2700 --plugin_opts "\-f 300 \-s \-c \-t"
+```
 
 # Bibtex citation
 
