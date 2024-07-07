@@ -5,10 +5,14 @@
 
 FROM --platform=amd64 firmsolo_dev:latest
 
+# Set the installation directory
+ARG INSTALL_DIR=/opt
+
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PIP_ROOT_USER_ACTION=ignore
 
+# Install packages
 RUN apt-get update && apt-get install -y \
 	build-essential \
 	zlib1g-dev \
@@ -59,65 +63,60 @@ RUN apt-get update && apt-get install -y \
 	qemu-system-arm \
 	qemu-system-mips \
 	qemu-system-mipsel \
-	qemu-utils
-
-# Install necessary packages
-RUN apt-get update && \
-		apt-get install -y \
-		curl \
-		tar \
-		bc \
-		python3 \
-		python3-pip \
-		docker.io \
-		libpq-dev \
-		busybox-static \
-		bash-static \
-		fakeroot \
-		dmsetup \
-		kpartx \
-		netcat-openbsd \
-		nmap \
-		python3-psycopg2 \
-		snmp \
-		uml-utilities \
-		util-linux \
-		vlan \
-		mtd-utils \
-		gzip \
-		bzip2 \
-		arj \
-		lhasa \
-		p7zip \
-		p7zip-full \
-		cabextract \
-		fusecram \
-		cramfsswap \
-		squashfs-tools \
-		sleuthkit \
-		default-jdk \
-		cpio \
-		lzop \
-		lzma \
-		srecord \
-		zlib1g-dev \
-		liblzma-dev \
-		liblzo2-dev \
-		unzip \
-		python3-magic \
-		openjdk-8-jdk \
-		unrar \
-		git \
-		wget \
-		build-essential \
-		sudo
+	qemu-utils \
+	curl \
+	tar \
+	bc \
+	python3 \
+	python3-pip \
+	docker.io \
+	libpq-dev \
+	busybox-static \
+	bash-static \
+	fakeroot \
+	dmsetup \
+	kpartx \
+	netcat-openbsd \
+	nmap \
+	python3-psycopg2 \
+	snmp \
+	uml-utilities \
+	util-linux \
+	vlan \
+	mtd-utils \
+	gzip \
+	bzip2 \
+	arj \
+	lhasa \
+	p7zip \
+	p7zip-full \
+	cabextract \
+	fusecram \
+	cramfsswap \
+	squashfs-tools \
+	sleuthkit \
+	default-jdk \
+	cpio \
+	lzop \
+	lzma \
+	srecord \
+	zlib1g-dev \
+	liblzma-dev \
+	liblzo2-dev \
+	unzip \
+	python3-magic \
+	openjdk-8-jdk \
+	unrar \
+	git \
+	wget \
+	build-essential \
+	sudo
 
 # Upgrade pip and install Python packages
 RUN python3 -m pip install --upgrade pip && \
-		python3 -m pip install coloredlogs psycopg2 psycopg2-binary python-lzo cstruct ubi_reader ply anytree sympy requests pexpect scipy python-Levenshtein
-
-# Set the installation directory
-ARG INSTALL_DIR=/opt
+		python3 -m pip install coloredlogs psycopg2 psycopg2-binary \
+		python-lzo cstruct ubi_reader ply anytree sympy requests pexpect \
+		scipy python-Levenshtein
 
 # Install binwalk from FirmAE
 RUN cd ${INSTALL_DIR} && \
@@ -182,28 +181,30 @@ RUN cd ${INSTALL_DIR}/panda/build && curl --proto '=https' --tlsv1.2 -sSf https:
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 
+# Install rustup & Fixup Installation
 RUN rustup toolchain install 1.66.1 && \
-rustup default 1.66.1
-
-# Fixup Installation
-RUN apt install execstack -y && \
-	execstack -c /root/.rustup/toolchains/1.66.1-x86_64-unknown-linux-gnu/lib/libLLVM-15-rust-1.66.1-stable.so
-	
-RUN echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu focal main universe" >> /etc/apt/sources.list && \
-apt update && \
-apt install -y --allow-downgrades openssl=1.1.1f-1ubuntu2
+		rustup default 1.66.1 && \
+		apt install execstack -y && \
+		execstack -c /root/.rustup/toolchains/1.66.1-x86_64-unknown-linux-gnu/lib/libLLVM-15-rust-1.66.1-stable.so && \
+		echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu focal main universe" >> /etc/apt/sources.list && \
+		apt update && \
+		apt install -y --allow-downgrades openssl=1.1.1f-1ubuntu2
 
 # Build PANDA
 RUN cd ${INSTALL_DIR}/panda/build && \
 	../build.sh --python
 
-# This step is last to allow caching on the previous layers
+# Finalize online downloads. For offline development, tag this layer as 'pandawan_base'.
+RUN cd ${INSTALL_DIR} && \
+	wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0.0/binaries.tar.gz
+
+# Add your local Pandawan repository
 ADD . ${INSTALL_DIR}/Pandawan
 
-# Download and extract Pandawan binaries
+# Download and extract Pandawan binaries to correct locations
 RUN mkdir -p ${INSTALL_DIR}/Pandawan/emul_config && \
 cd ${INSTALL_DIR}/Pandawan/emul_config && \
-wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0.0/binaries.tar.gz && \
+mv ${INSTALL_DIR}/binaries.tar.gz . && \
 tar xvf binaries.tar.gz && \
 rm binaries.tar.gz && \
 cp ${INSTALL_DIR}/Pandawan/emul_config/core/unstuff /usr/local/bin/
