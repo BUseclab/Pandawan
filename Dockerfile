@@ -163,53 +163,50 @@ RUN git clone https://github.com/BUseclab/TriforceAFL.git ${INSTALL_DIR}/Triforc
 RUN git clone -b pandawan https://github.com/BUseclab/TriforceLinuxSyscallFuzzer.git ${INSTALL_DIR}/TriforceLinuxSyscallFuzzer && \
 		cd ${INSTALL_DIR}/TriforceLinuxSyscallFuzzer/pandawan && \
 		./compile_harnesses.sh
-
+		
+ADD panda_patches ${INSTALL_DIR}/Pandawan/panda_patches
 # Install PANDA
 RUN git clone --recursive https://github.com/panda-re/panda.git ${INSTALL_DIR}/panda && \
-		cd ${INSTALL_DIR}/panda && \
-		./panda/scripts/install_ubuntu.sh && \
-		make clean && \
-		git checkout ea682853034aeb5df110fec4e439420162d65c4f && \
-		git apply ${INSTALL_DIR}/Pandawan/panda_patches/0001-Changes-added-for-pandawan.patch && \
-		git apply ${INSTALL_DIR}/Pandawan/panda_patches/0003-A-fix-for-syscalls_logger.patch && \
-		git apply ${INSTALL_DIR}/Pandawan/panda_patches/0005-Patch-coverage-plugin-to-print-info-about-the-origin.patch
+cd ${INSTALL_DIR}/panda && \
+./panda/scripts/install_ubuntu.sh && \
+make clean && \
+git checkout ea682853034aeb5df110fec4e439420162d65c4f && \
+git apply ${INSTALL_DIR}/Pandawan/panda_patches/0001-Changes-added-for-pandawan.patch && \
+git apply ${INSTALL_DIR}/Pandawan/panda_patches/0003-A-fix-for-syscalls_logger.patch && \
+git apply ${INSTALL_DIR}/Pandawan/panda_patches/0005-Patch-coverage-plugin-to-print-info-about-the-origin.patch
 
 # Install rust
 RUN cd ${INSTALL_DIR}/panda/build && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rust.sh && \
-		chmod +x ./rust.sh && \
-		./rust.sh -y
+chmod +x ./rust.sh && \
+./rust.sh -y
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Install rustup & Fixup Installation
 RUN rustup toolchain install 1.66.1 && \
-		rustup default 1.66.1 && \
-		apt install execstack -y && \
-		execstack -c /root/.rustup/toolchains/1.66.1-x86_64-unknown-linux-gnu/lib/libLLVM-15-rust-1.66.1-stable.so && \
-		echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu focal main universe" >> /etc/apt/sources.list && \
-		apt update && \
-		apt install -y --allow-downgrades openssl=1.1.1f-1ubuntu2
+rustup default 1.66.1 && \
+apt install execstack -y && \
+execstack -c /root/.rustup/toolchains/1.66.1-x86_64-unknown-linux-gnu/lib/libLLVM-15-rust-1.66.1-stable.so && \
+echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu focal main universe" >> /etc/apt/sources.list && \
+apt update && \
+apt install -y --allow-downgrades openssl=1.1.1f-1ubuntu2
 
 # Build PANDA
 RUN cd ${INSTALL_DIR}/panda/build && \
-	../build.sh --python
+../build.sh --python
 
-# Finalize online downloads. For offline development, tag this layer as 'pandawan_base'.
-RUN cd ${INSTALL_DIR} && \
-	wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0.0/binaries.tar.gz
+RUN mkdir -p ${INSTALL_DIR}/Pandawan/emul_config && \
+cd ${INSTALL_DIR}/Pandawan/emul_config && \
+wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0.0/binaries.tar.gz && \
+tar xvf binaries.tar.gz && \
+rm binaries.tar.gz
+
+ADD emul_config/core/unstuff /usr/local/bin/
 
 # Add your local Pandawan repository
 ADD . ${INSTALL_DIR}/Pandawan
 
-# Download and extract Pandawan binaries to correct locations
-RUN mkdir -p ${INSTALL_DIR}/Pandawan/emul_config && \
-cd ${INSTALL_DIR}/Pandawan/emul_config && \
-mv ${INSTALL_DIR}/binaries.tar.gz . && \
-tar xvf binaries.tar.gz && \
-rm binaries.tar.gz && \
-cp ${INSTALL_DIR}/Pandawan/emul_config/core/unstuff /usr/local/bin/
-	
-	# Set working directory
+# Set working directory
 ENV INSTALL_DIR=${INSTALL_DIR}
 WORKDIR ${INSTALL_DIR}
 
