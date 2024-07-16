@@ -136,15 +136,15 @@ class Pandawan(FirmSolo):
         self.system = system
         # If the image string is an ID we assume that the image is already extracted
         # Else extract it using the extractor from FirmAE
-        if not image_name.isnumeric():
+        if image_name.isnumeric():
             iids = os.listdir(f"{pt.output_dir}/scratch/")
             iids = list(map (lambda x:int(x), iids))
             iid = 1
             try:
                 iid = str(int(sorted(iids)[-1]) + 1)
-            except:
-                print("Did not properly create an ID for the image")
-                sys.exit(1)
+            except Exception:
+                print(f"Did not properly create an ID for the image")
+                # sys.exit(1)
             result = self.__run_config(image_name, iid)
             if not result:
                 return

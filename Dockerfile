@@ -131,15 +131,6 @@ RUN cd ${INSTALL_DIR} && \
 		echo y | ./deps.sh && \
 		python3 setup.py install
 
-# Install FirmSolo
-RUN git clone --recursive -b pandawan https://github.com/BUseclab/FirmSolo.git ${INSTALL_DIR}/FirmSolo && \
-		cd ${INSTALL_DIR}/FirmSolo && \
-		git clone https://github.com/BUseclab/FirmSolo-data.git && \
-		mv ./FirmSolo-data/buildroot_fs.tar.gz . && \
-		rm -rf ./FirmSolo-data && \
-		tar xvf buildroot_fs.tar.gz && \
-		rm buildroot_fs.tar.gz
-
 # Install custom FirmAE version
 RUN cd ${INSTALL_DIR} && \
 		wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0.0/firmae.tar.gz && \
@@ -152,7 +143,11 @@ RUN cd ${INSTALL_DIR} && \
 		wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0.0/firmadyne.tar.gz && \
 		tar xvf firmadyne.tar.gz && \
 		rm firmadyne.tar.gz && \
-		cd firmadyne && ./download.sh
+		cd firmadyne && ./download.sh && \
+		pg_ctlcluster 14 main start && \
+		echo "firmadyne\nfirmadyne" | sudo -u postgres createuser -P firmadyne && \
+		sudo -u postgres createdb -O firmadyne firmware && \
+		sudo -u postgres psql -d firmware < ${INSTALL_DIR}/firmadyne/database/schema
 
 # Install TriforceAFL
 RUN git clone https://github.com/BUseclab/TriforceAFL.git ${INSTALL_DIR}/TriforceAFL && \
@@ -165,6 +160,7 @@ RUN git clone -b pandawan https://github.com/BUseclab/TriforceLinuxSyscallFuzzer
 		./compile_harnesses.sh
 		
 ADD panda_patches ${INSTALL_DIR}/Pandawan/panda_patches
+
 # Install PANDA
 RUN git clone --recursive https://github.com/panda-re/panda.git ${INSTALL_DIR}/panda && \
 cd ${INSTALL_DIR}/panda && \
@@ -201,10 +197,22 @@ wget -N --continue https://github.com/BUseclab/Pandawan/releases/download/v1.0.0
 tar xvf binaries.tar.gz && \
 rm binaries.tar.gz
 
+# Install FirmSolo
+RUN git clone --recursive -b pandawan https://github.com/reteps/FirmSolo.git ${INSTALL_DIR}/FirmSolo && \
+		cd ${INSTALL_DIR}/FirmSolo && \
+		git clone https://github.com/BUseclab/FirmSolo-data.git && \
+		mv ./FirmSolo-data/buildroot_fs.tar.gz . && \
+		rm -rf ./FirmSolo-data && \
+		tar xvf buildroot_fs.tar.gz && \
+		rm buildroot_fs.tar.gz
+
+# Add unstuff binary
 ADD emul_config/core/unstuff /usr/local/bin/
 
 # Add your local Pandawan repository
-ADD . ${INSTALL_DIR}/Pandawan
+# ADD . ${INSTALL_DIR}/Pandawan
+# Alternatively, bind-mount the current directory.
+# -v $(pwd)/workdir:/opt/output -v $(pwd)/workdir:/opt/Pandawan
 
 # Set working directory
 ENV INSTALL_DIR=${INSTALL_DIR}
