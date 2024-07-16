@@ -6,7 +6,7 @@
 FROM --platform=amd64 firmsolo_dev:latest
 
 # Set the installation directory
-ARG INSTALL_DIR=/opt
+ARG INSTALL_DIR=/
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive

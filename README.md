@@ -50,8 +50,10 @@ docker run -v $(pwd)/workdir:/output --rm -it --privileged pandawan /bin/bash
 Then, inside docker,
 
 ```bash
-cd output/images && /opt/firmadyne/sources/extractor/extractor.py -b <brand> -sql 127.0.0.1 -np <fw_bin>
-cd /opt/Pandawan
+cd /output
+pg_ctlcluster 14 main start
+/firmadyne/sources/extractor/extractor.py -b <brand> -sql 127.0.0.1 -np images/     <fw_bin>
+cd /Pandawan
 python3 run_pandawan.py 1 -a -e -s -g 2700 -p "\-f 300 \-s \-c \-t"
 ```
 
