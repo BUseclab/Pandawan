@@ -198,7 +198,7 @@ tar xvf binaries.tar.gz && \
 rm binaries.tar.gz
 
 # Install FirmSolo
-RUN git clone --recursive -b pandawan https://github.com/reteps/FirmSolo.git ${INSTALL_DIR}/FirmSolo && \
+RUN git clone --recursive -b pandawan https://github.com/BUseclab/FirmSolo.git ${INSTALL_DIR}/FirmSolo && \
 		cd ${INSTALL_DIR}/FirmSolo && \
 		git clone https://github.com/BUseclab/FirmSolo-data.git && \
 		mv ./FirmSolo-data/buildroot_fs.tar.gz . && \
@@ -210,9 +210,8 @@ RUN git clone --recursive -b pandawan https://github.com/reteps/FirmSolo.git ${I
 ADD emul_config/core/unstuff /usr/local/bin/
 
 # Add your local Pandawan repository
+# If you are doing development, comment this line and use a bind mount instead.
 # ADD . ${INSTALL_DIR}/Pandawan
-# Alternatively, bind-mount the current directory.
-# -v $(pwd)/workdir:/opt/output -v $(pwd)/workdir:/opt/Pandawan
 
 # Set working directory
 ENV INSTALL_DIR=${INSTALL_DIR}

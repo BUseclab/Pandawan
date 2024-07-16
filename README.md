@@ -26,7 +26,7 @@ cd <pw_install_dir>/
 docker build -t pandawan .
 ```
 
-Change `<pw_install_dir>` to the directory where you cloned Pandawan.
+Change `<pw_install_dir>` to the directory where you cloned Pandawan. Pandawan is quite large (~50gb), so a `docker system prune` may be useful beforehand.
 
 **Running the docker**
 
@@ -38,13 +38,29 @@ cd workdir
 docker run -v $(pwd):/output --rm -it --privileged pandawan /bin/bash
 ```
 
+**Running the docker on custom images**
+
+```bash
+cd <pw_install_dir>
+mkdir -p workdir/images
+cp <fw_bin> workdir/images
+docker run -v $(pwd)/workdir:/output --rm -it --privileged pandawan /bin/bash
+```
+
+Then, inside docker,
+
+```bash
+cd output/images && /opt/firmadyne/sources/extractor/extractor.py -b <brand> -sql 127.0.0.1 -np <fw_bin>
+cd /opt/Pandawan
+python3 run_pandawan.py 1 -a -e -s -g 2700 -p "\-f 300 \-s \-c \-t"
+```
+
 It is assumed that your work directory (`<work_dir>`) is the current directory (`$(pwd)`)
 
 Inside the docker run:
 
 ```bash
-mkdir -p /output/images/
-echo core >/proc/sys/kernel/core_pattern
+echo core > /proc/sys/kernel/core_pattern
 cd /sys/devices/system/cpu
 echo performance | tee cpu*/cpufreq/scaling_governor
 ```
