@@ -6,7 +6,7 @@ Pandawan uses as its foundation the FirmSolo, FirmAE and (Py)PANDA frameworks.
 Finally, Pandawan enables the comparison of different Linux-based firmware re-hosting frameworks (e.g., Pandawan, FirmSolo, Firmadyne, and FirmAE) across their re-hosting capabilities.
 Currently, we use the executed user programs, the unique executed user QEMU TBs, the kernel modules loaded and unique kernel module TBs executed as our comparison metrics.
 
-<!-- This repository contains the prototype implementation of Pandawan based on the Usenix 2024 [paper](https://www.usenix.org/conference/usenixsecurity23/presentation/angelakopoulos). -->
+This repository contains the prototype implementation of Pandawan based on the Usenix 2024 [paper](https://github.com/BUseclab/Pandawan/blob/main/paper/paper.pdf)
 
 **Note:** Some parts of the code may need cleanup or re-writing in the worst case, thus this prototype is not yet ready for production.
 
