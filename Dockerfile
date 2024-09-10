@@ -211,7 +211,7 @@ ADD emul_config/core/unstuff /usr/local/bin/
 
 # Add your local Pandawan repository
 # If you are doing development, comment this line and use a bind mount instead.
-# ADD . ${INSTALL_DIR}/Pandawan
+ADD . ${INSTALL_DIR}/Pandawan
 
 # Set working directory
 ENV INSTALL_DIR=${INSTALL_DIR}
