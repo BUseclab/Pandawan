@@ -52,14 +52,14 @@ Then, inside docker,
 ```bash
 cd /output
 pg_ctlcluster 14 main start
-/firmadyne/sources/extractor/extractor.py -b <brand> -sql 127.0.0.1 -np images/     <fw_bin>
+/firmadyne/sources/extractor/extractor.py -b <brand> -sql 127.0.0.1 -np <fw_bin> images/
 cd /Pandawan
-python3 run_pandawan.py 1 -a -e -s -g 2700 -p "\-f 300 \-s \-c \-t"
+python3 run_pandawan.py <image_id> -a -e -s -g 2700 -p "\-f 300 \-s \-c \-t"
 ```
 
-It is assumed that your work directory (`<work_dir>`) is the current directory (`$(pwd)`)
+It is assumed that your work directory (`<work_dir>`) is the current directory (`$(pwd)`). The `<image_id>` is the identifier provided by the `extractor.py` script.
 
-Inside the docker run:
+To be able to fuzz the firmware image with TriforceAFL run:
 
 ```bash
 echo core > /proc/sys/kernel/core_pattern
@@ -143,7 +143,7 @@ The `images` directory stores the extracted file-systems and kernels of the targ
 To run the re-hosting experiments of Pandawan execute:
 
 ```
-run_pandawan.py 14092 -a -s -d -g 2700 -p "\-f 300 \-s \-c \-t"
+run_pandawan.py <image_id> -a -s -d -g 2700 -p "\-f 300 \-s \-c \-t"
 ```
 
 The above command will run all the steps of Pandawan's re-hosting process while enabling all the PyPANDA plugins (`-p` takes the arguments that will be given to the dedicated PyPANDA scripts created for each image). Specifically, the `-f 300` option enables the FICD plugin with a time-frame of 300 seconds and `\-t` enables the `SyscallToKmodTracer` plugin. The `-s` enables PANDA's `syscalls_logger` plugin and `-c` enables PANDA's `coverage` plugin.
@@ -249,14 +249,7 @@ You will find the fuzzers output within: `<work_dir>/Fuzz_Results_Curr/1/`. We w
 
 **Analyze custom firmware images:**
 
-To analyze firmware images besides our examples, you first need to extract their file-system and kernel.
-Then you can provide the path to the firmware image blob to Pandawan instead of an image ID to analyze the image. Once you run the experiments once you can continue using the ID that is created by Pandawan afterwards. 
-
-## Example
-
-```bash
-run_pandawan.py images/"firmware blob" --all --do_subs --firmsolo --global_timeout 2700 --plugin_opts "\-f 300 \-s \-c \-t"
-```
+To analyze firmware images besides our examples follow the instructions in the subsection _Running the docker on custom images_.
 
 # Bibtex citation
 
