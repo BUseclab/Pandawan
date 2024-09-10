@@ -142,8 +142,8 @@ class Pandawan(FirmSolo):
             iid = 1
             try:
                 iid = str(int(sorted(iids)[-1]) + 1)
-            except:
-                print("Did not properly create an ID for the image")
+            except Exception:
+                print(f"Did not properly create an ID for the image")
                 sys.exit(1)
             result = self.__run_config(image_name, iid)
             if not result:

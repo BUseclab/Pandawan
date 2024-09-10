@@ -18,7 +18,7 @@ https://doi.org/10.5281/zenodo.7865451
 
 Execute:
 
-```
+```bash
 docker load < firmsolo.tar.gz
 
 cd <pw_install_dir>/
@@ -26,11 +26,11 @@ cd <pw_install_dir>/
 docker build -t pandawan .
 ```
 
-Change `<pw_install_dir>` to the directory where you cloned Pandawan.
+Change `<pw_install_dir>` to the directory where you cloned Pandawan. Pandawan is quite large (~50gb), so a `docker system prune` may be useful beforehand.
 
 **Running the docker**
 
-```
+```bash
 mkdir -p workdir
 
 cd workdir
@@ -38,12 +38,31 @@ cd workdir
 docker run -v $(pwd):/output --rm -it --privileged pandawan /bin/bash
 ```
 
-It is assumed that your work directory (`<work_dir>`) is the current directory (`$(pwd)`)
+**Running the docker on custom images**
 
-Inside the docker run:
+```bash
+cd <pw_install_dir>
+mkdir -p workdir/images
+cp <fw_bin> workdir/images
+docker run -v $(pwd)/workdir:/output --rm -it --privileged pandawan /bin/bash
 ```
-mkdir -p /output/images/
-echo core >/proc/sys/kernel/core_pattern
+
+Then, inside docker,
+
+```bash
+cd /output
+pg_ctlcluster 14 main start
+/firmadyne/sources/extractor/extractor.py -b <brand> -sql 127.0.0.1 -np <fw_bin> images/
+cd /Pandawan
+python3 run_pandawan.py <image_id> -a -e -s -g 2700 -p "\-f 300 \-s \-c \-t"
+```
+
+It is assumed that your work directory (`<work_dir>`) is the current directory (`$(pwd)`). The `<image_id>` is the identifier provided by the `extractor.py` script.
+
+To be able to fuzz the firmware image with TriforceAFL run:
+
+```bash
+echo core > /proc/sys/kernel/core_pattern
 cd /sys/devices/system/cpu
 echo performance | tee cpu*/cpufreq/scaling_governor
 ```
@@ -124,7 +143,7 @@ The `images` directory stores the extracted file-systems and kernels of the targ
 To run the re-hosting experiments of Pandawan execute:
 
 ```
-run_pandawan.py 14092 -a -s -d -g 2700 -p "\-f 300 \-s \-c \-t"
+run_pandawan.py <image_id> -a -s -d -g 2700 -p "\-f 300 \-s \-c \-t"
 ```
 
 The above command will run all the steps of Pandawan's re-hosting process while enabling all the PyPANDA plugins (`-p` takes the arguments that will be given to the dedicated PyPANDA scripts created for each image). Specifically, the `-f 300` option enables the FICD plugin with a time-frame of 300 seconds and `\-t` enables the `SyscallToKmodTracer` plugin. The `-s` enables PANDA's `syscalls_logger` plugin and `-c` enables PANDA's `coverage` plugin.
@@ -230,8 +249,7 @@ You will find the fuzzers output within: `<work_dir>/Fuzz_Results_Curr/1/`. We w
 
 **Analyze custom firmware images:**
 
-To analyze firmware images besides our examples, you first need to extract their file-system and kernel.
-Then you can provide the path to the firmware image blob to Pandawan instead of an image ID to analyze the image. Once you run the experiments once you can continue using the ID that is created by Pandawan afterwards. 
+To analyze firmware images besides our examples follow the instructions in the subsection _Running the docker on custom images_.
 
 # Bibtex citation
 
