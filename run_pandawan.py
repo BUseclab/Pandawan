@@ -135,21 +135,10 @@ class Pandawan(FirmSolo):
         self.plugin_opts = plugin_opts
         self.system = system
         # If the image string is an ID we assume that the image is already extracted
-        # Else extract it using the extractor from FirmAE
+        # Else extract it using the extractor from Firmadyne first.
         if not image_name.isnumeric():
-            iids = os.listdir(f"{pt.output_dir}/scratch/")
-            iids = list(map (lambda x:int(x), iids))
-            iid = 1
-            try:
-                iid = str(int(sorted(iids)[-1]) + 1)
-            except Exception:
-                print(f"Did not properly create an ID for the image")
-                sys.exit(1)
-            result = self.__run_config(image_name, iid)
-            if not result:
-                return
-            print("The image IID is", iid)
-            super().__init__(iid)
+            printf("Please extract the image first and provide an image identifier to Pandawan")
+            sys.exit(1)
         else:
             super().__init__(image_name)
         
@@ -157,10 +146,29 @@ class Pandawan(FirmSolo):
         sb.run(["mkdir", "-p", f"{self.scratch_dir}/"])
         self.times_run_dslc = 0
         self.times_run_pw_subs = 0
+        # If we have already ran experiments for the target image and system, restore the files to
+        # the generic output dir
+        self.restore_image_files()
 
-    # TODO: change this.
+    # TODO: Change the two functions below.
     # It should not copy every time the results for each system
-    # every system should have its own dir from the beginning
+    # Every system should have its own dir from the beginning
+    def restore_image_files(self):
+        if not os.path.exists(f"{cu.abs_path}/{self.system}_results/results/{self.image}"):
+            return
+        for dir in data_dirs:
+            target = self.image
+            if dir == "Image_Info":
+                target = f"{self.image}.pkl"
+            if dir == "logs":
+                target = ""
+            cmd = f"rsync -a {cu.abs_path}/{self.system}_results/{dir}/{target} {cu.abs_path}/{dir}/"
+            try:
+                sb.run(cmd, shell=True)
+            except:
+                print(f"Pandawan could not restore the data from {cu.abs_path}/{self.system}_results/{dir}. Run the experiments with the -a option")
+                break
+
     def save_system_data(self):
         for dir in data_dirs:
             target = self.image
