@@ -136,7 +136,7 @@ class TriforceAFL:
         elif self.arch == "arm":
             qemu = "qemu-system-arm"
             self.kernel_path = \
-                    f"{pt.output_dir}/pandawan_resultsresults/{self.image}/{self.kernel}/zImage"
+                    f"{pt.output_dir}/pandawan_results/results/{self.image}/{self.kernel}/zImage"
         else:
             return False
 
