@@ -109,9 +109,9 @@ class KmodFuncTracer(PyPlugin):
 
     def uninit(self):
         try:
-            with open(f"{self.scratch}/pandawan_results/exec_trace.pkl", "wb") as f:
+            with open(f"{self.scratch}/exec_trace.pkl", "wb") as f:
                 pickle.dump(self.panda.exec_traces, f)
-            with open(f"{self.scratch}/pandawan_results/exec_context.pkl", "wb") as f:
+            with open(f"{self.scratch}/exec_context.pkl", "wb") as f:
                 pickle.dump(self.panda.exec_context, f)
         except:
             pass
